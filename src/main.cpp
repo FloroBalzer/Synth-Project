@@ -5,7 +5,9 @@
 
 // Constants
 const uint32_t interval = 100; // Display update interval
-const uint32_t stepSizes[] = {51076922, 54112683, 57330004, 60740598, 64352275, 68178701, 72231588, 76528508, 81077269, 85899345, 91006452, 96418111};
+double frequencies[] = {261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392, 415.3, 440, 466.16, 493.88};
+const uint32_t stepSizes[] = {51076922, 54112683, 57330004, 60740598, 64352275, 68178701, 72231588, 76528508, 81077269, 85899345, 91006452, 96418111, 0};
+const std::string note[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Key"};
 
 // Pin definitions
 // Row select and enable
@@ -128,10 +130,10 @@ void loop()
   static uint32_t next = millis();
   static uint32_t count = 0;
 
-  while (millis() < next)
-    ; // Wait for next interval
+  while (millis() < next); // Wait for next interval
 
   next += interval;
+  int step = 12;
 
   // Update display
   u8g2.clearBuffer();                  // clear the internal memory
@@ -139,89 +141,28 @@ void loop()
   u8g2.drawStr(2, 10, "Hello World!"); // write something to the internal memory
   u8g2.setCursor(2, 20);
 
-  double frequencies[] = {261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392, 415.3, 440, 466.16, 493.88};
-
   uint8_t keyArray[7];
-  std::string note;
+  std::string played_note;
 
-  for (int i = 0; i <= 2; i++)
+  for (int i = 0; i < 3; i++)
   {
     setRow(i);
     delayMicroseconds(3);
     uint8_t keys = readCols();
     keyArray[i] = keys;
-    if (keyArray[i] == 0b0111 && i == 0)
-    {
-      note = "C";
-      currentStepSize = stepSizes[0];
-    }
-    else if (keyArray[i] == 0b1011 && i == 0)
-    {
-      note = "C#";
-      currentStepSize = stepSizes[1];
-    }
+  }
 
-    else if (keyArray[i] == 0b1101 && i == 0)
+  for (int i = 0; i < 3; i++)
+  {
+    for (int j = 0; j < 4; j++)
     {
-      note = "D";
-      currentStepSize = stepSizes[2];
+      if (~keyArray[i]  & (1 << j))
+      {
+        step =3-j + (4 * i);
+      }
     }
-
-    else if (keyArray[i] == 0b1110 && i == 0)
-    {
-      note = "D#";
-      currentStepSize = stepSizes[3];
-    }
-
-    else if (keyArray[i] == 0b0111 && i == 1)
-    {
-      note = "E";
-      currentStepSize = stepSizes[4];
-    }
-
-    else if (keyArray[i] == 0b1011 && i == 1)
-    {
-      note = "F";
-      currentStepSize = stepSizes[5];
-    }
-
-    else if (keyArray[i] == 0b1101 && i == 1)
-    {
-      note = "F#";
-      currentStepSize = stepSizes[6];
-    }
-
-    else if (keyArray[i] == 0b1110 && i == 1)
-    {
-      note = "G";
-      currentStepSize = stepSizes[7];
-    }
-
-    else if (keyArray[i] == 0b0111 && i == 2)
-    {
-      note = "G#";
-      currentStepSize = stepSizes[8];
-    }
-
-    else if (keyArray[i] == 0b1011 && i == 2)
-    {
-      note = "A";
-      currentStepSize = stepSizes[9];
-    }
-
-    else if (keyArray[i] == 0b1101 && i == 2)
-    {
-      note = "A#";
-      currentStepSize = stepSizes[10];
-    }
-
-    else if (keyArray[i] == 0b1110 && i == 2)
-    {
-      note = "B";
-      currentStepSize = stepSizes[11];
-    }
-
-    std::cout << keyArray[i] << std::endl;
+    currentStepSize=stepSizes[step];
+    played_note = note[step];
   }
 
   std::cout << currentStepSize << std::endl;
@@ -232,7 +173,7 @@ void loop()
   u8g2.print(" ");
   u8g2.print(keyArray[2], HEX);
   u8g2.setFont(u8g2_font_ncenB08_tr);
-  u8g2.drawStr(2, 30, note.c_str());
+  u8g2.drawStr(2, 30, played_note.c_str());
   u8g2.sendBuffer(); // transfer internal memory to the display
 
   // Toggle LED
