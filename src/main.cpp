@@ -3,54 +3,61 @@
 #include <iostream>
 #include <string>
 #include <STM32FreeRTOS.h>
+#include <ES_CAN.h>
 
 #include "knobs.h"
 
 //Constants
 
 //Pin definitions
-  //Row select and enable
-  const int RA0_PIN = D3;
-  const int RA1_PIN = D6;
-  const int RA2_PIN = D12;
-  const int REN_PIN = A5;
+//Row select and enable
+const int RA0_PIN = D3;
+const int RA1_PIN = D6;
+const int RA2_PIN = D12;
+const int REN_PIN = A5;
 
-  //Matrix input and output
-  const int C0_PIN = A2;
-  const int C1_PIN = D9;
-  const int C2_PIN = A6;
-  const int C3_PIN = D1;
-  const int OUT_PIN = D11;
+//Matrix input and output
+const int C0_PIN = A2;
+const int C1_PIN = D9;
+const int C2_PIN = A6;
+const int C3_PIN = D1;
+const int OUT_PIN = D11;
 
-  //Audio analogue out
-  const int OUTL_PIN = A4;
-  const int OUTR_PIN = A3;
+//Audio analogue out
+const int OUTL_PIN = A4;
+const int OUTR_PIN = A3;
 
-  //Joystick analogue in
-  const int JOYY_PIN = A0;
-  const int JOYX_PIN = A1;
+//Joystick analogue in
+const int JOYY_PIN = A0;
+const int JOYX_PIN = A1;
 
-  //Output multiplexer bits
-  const int DEN_BIT = 3;
-  const int DRST_BIT = 4;
-  const int HKOW_BIT = 5;
-  const int HKOE_BIT = 6;
+//Output multiplexer bits
+const int DEN_BIT = 3;
+const int DRST_BIT = 4;
+const int HKOW_BIT = 5;
+const int HKOE_BIT = 6;
 
-  //other
-  volatile uint32_t currentStepSize;
-  volatile int step;
+//other
+volatile uint32_t currentStepSize;
+volatile int step;
 
-  //Step Size Array
-  const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
-  const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
-  
-  //Key Array
-  SemaphoreHandle_t keyArrayMutex;
-  volatile uint8_t keyArray[7];
+//Step Size Array
+const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
+const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
 
-  //Knobs
-  Knob Volume(8, 8, 0, 3);
-  Knob Octave(0, 3, 0, 2);
+//Key Array
+SemaphoreHandle_t keyArrayMutex;
+volatile uint8_t keyArray[7];
+
+//Knobs
+Knob Volume(8, 8, 0, 3);
+Knob Octave(0, 3, 0, 2);
+
+//CAN
+QueueHandle_t msgInQ;
+QueueHandle_t msgOutQ;
+volatile uint8_t RX_Message[8] = {0};
+SemaphoreHandle_t CAN_TX_Semaphore;
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -76,6 +83,17 @@ void sampleISR() {
 
   Vout = Vout >> (8 - Volume.value);
   analogWrite(OUTR_PIN, Vout + 128);
+}
+
+void CAN_RX_ISR (void) {
+	uint8_t RX_Message_ISR[8];
+	uint32_t ID;
+	CAN_RX(ID, RX_Message_ISR);
+	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+}
+
+void CAN_TX_ISR (void) {
+	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
 }
 
 void setRow(uint8_t rowIdx) {
@@ -106,6 +124,9 @@ void scanKeysTask(void * pvParameters) {
 
   uint8_t keys;
 
+  //CAN BUS
+  uint8_t TX_Message[8] = {0};
+
   while(1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
   
@@ -133,12 +154,22 @@ void scanKeysTask(void * pvParameters) {
 
     Volume.read_knob();
     Octave.read_knob();
+
+    TX_Message[0] = 'p';
+    TX_Message[1] = Octave.value;
+    TX_Message[2] = step;
+
+    xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+    
   }
 }
 
 void displayUpdateTask(void * pvParameters) {
   const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
+
+  //CAN Bus
+  uint32_t ID;
 
   while(1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
@@ -148,27 +179,49 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
     
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+    u8g2.drawStr(2, 10, notes[step].c_str());
+
     u8g2.setCursor(2,20);
     u8g2.print(keyArray[2], HEX);
     u8g2.print(" ");
     u8g2.print(keyArray[1], HEX);
     u8g2.print(" ");
     u8g2.print(keyArray[0], HEX);
-    u8g2.drawStr(2, 10, notes[step].c_str());
+
     u8g2.drawStr(2, 30, "V: ");
     u8g2.setCursor(15,30);
     u8g2.print(Volume.value);
     u8g2.drawStr(25, 30, "O: ");
     u8g2.setCursor(40,30);
     u8g2.print(Octave.value);
+
+    u8g2.setCursor(66,30);
+    u8g2.print((char) RX_Message[0]);
+    u8g2.print(RX_Message[1]);
+    u8g2.print(RX_Message[2]);
+
     u8g2.sendBuffer();  // transfer internal memory to the display
     xSemaphoreGive(keyArrayMutex);
-
 
     //Toggle LED
     digitalToggle(LED_BUILTIN);
   }
+}
 
+void decodeTask(void * pvParameters){
+
+  while(1){
+    xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+  }
+}
+
+void CAN_TX_Task (void * pvParameters) {
+	uint8_t msgOut[8];
+	while (1) {
+		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+		CAN_TX(0x123, msgOut);
+	}
 }
 
 void setup() {
@@ -207,6 +260,15 @@ void setup() {
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
 
+  //Initialise CAN
+  CAN_Init(true);
+  setCANFilter(0x123,0x7ff);
+  CAN_RegisterRX_ISR(CAN_RX_ISR);
+  CAN_RegisterTX_ISR(CAN_TX_ISR);
+  CAN_Start();
+
+  msgInQ = xQueueCreate(36,8);
+
   TaskHandle_t scanKeysHandle = NULL;
   xTaskCreate(
   scanKeysTask,		/* Function that implements the task */
@@ -225,10 +287,19 @@ void setup() {
   1,			/* Task priority */
   &displayUpdateHandle );	/* Pointer to store the task handle */
 
+  TaskHandle_t decodeHandle = NULL;
+  xTaskCreate(
+  decodeTask,		/* Function that implements the task */
+  "decode",		/* Text name for the task */
+  256,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */
+  1,			/* Task priority */
+  &displayUpdateHandle );	/* Pointer to store the task handle */
+
   keyArrayMutex = xSemaphoreCreateMutex();
+  CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
 
   vTaskStartScheduler();
-
 }
 
 void loop() {
