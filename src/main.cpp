@@ -10,48 +10,64 @@
 //Constants
 
 //Pin definitions
-  //Row select and enable
-  const int RA0_PIN = D3;
-  const int RA1_PIN = D6;
-  const int RA2_PIN = D12;
-  const int REN_PIN = A5;
+//Row select and enable
+const int RA0_PIN = D3;
+const int RA1_PIN = D6;
+const int RA2_PIN = D12;
+const int REN_PIN = A5;
 
-  //Matrix input and output
-  const int C0_PIN = A2;
-  const int C1_PIN = D9;
-  const int C2_PIN = A6;
-  const int C3_PIN = D1;
-  const int OUT_PIN = D11;
+//Matrix input and output
+const int C0_PIN = A2;
+const int C1_PIN = D9;
+const int C2_PIN = A6;
+const int C3_PIN = D1;
+const int OUT_PIN = D11;
 
-  //Audio analogue out
-  const int OUTL_PIN = A4;
-  const int OUTR_PIN = A3;
+//Audio analogue out
+const int OUTL_PIN = A4;
+const int OUTR_PIN = A3;
 
-  //Joystick analogue in
-  const int JOYY_PIN = A0;
-  const int JOYX_PIN = A1;
+//Joystick analogue in
+const int JOYY_PIN = A0;
+const int JOYX_PIN = A1;
 
-  //Output multiplexer bits
-  const int DEN_BIT = 3;
-  const int DRST_BIT = 4;
-  const int HKOW_BIT = 5;
-  const int HKOE_BIT = 6;
+//Output multiplexer bits
+const int DEN_BIT = 3;
+const int DRST_BIT = 4;
+const int HKOW_BIT = 5;
+const int HKOE_BIT = 6;
 
-  //other
-  volatile uint32_t currentStepSize;
-  volatile int step;
+//other
+volatile uint32_t currentStepSize;
+volatile int step;
 
-  //Step Size Array
-  const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
-  const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
-  
-  //Key Array
-  SemaphoreHandle_t keyArrayMutex;
-  volatile uint8_t keyArray[7];
+//Step Size Array
+const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
+const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
 
-  //Knobs
-  Knob Volume(8, 8, 0, 3);
-  Knob Octave(0, 3, 0, 2);
+//Key Array
+SemaphoreHandle_t keyArrayMutex;
+volatile uint8_t keyArray[7];
+
+//Knobs
+Knob Volume(8, 8, 0, 3);
+Knob Octave(0, 3, 0, 2);
+Knob Waveform(0, 3, 0, 1);
+
+//waveforms
+// This is the only wave we set up "by hand"
+// Note: this is the first half of the wave,
+//       the second half is just this mirrored.
+const unsigned char sinetable[128] = {
+    0,   0,   0,   0,   1,   1,   1,   2,   2,   3,   4,   5,   5,   6,   7,   9,
+   10,  11,  12,  14,  15,  17,  18,  20,  21,  23,  25,  27,  29,  31,  33,  35,
+   37,  40,  42,  44,  47,  49,  52,  54,  57,  59,  62,  65,  67,  70,  73,  76,
+   79,  82,  85,  88,  90,  93,  97, 100, 103, 106, 109, 112, 115, 118, 121, 124,
+  128, 131, 134, 137, 140, 143, 146, 149, 152, 155, 158, 162, 165, 167, 170, 173,
+  176, 179, 182, 185, 188, 190, 193, 196, 198, 201, 203, 206, 208, 211, 213, 215,
+  218, 220, 222, 224, 226, 228, 230, 232, 234, 235, 237, 238, 240, 241, 243, 244,
+  245, 246, 248, 249, 250, 250, 251, 252, 253, 253, 254, 254, 254, 255, 255, 255,
+};
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -73,9 +89,45 @@ void sampleISR() {
 
   phaseAcc += currentStepSize << Octave.value;
 
-  int32_t Vout = (phaseAcc >> 24) - 128;
+  int wavetype = Waveform.value;
+  int32_t Vout;
+
+  if (wavetype == 0) {
+    //Sawtooth
+    Vout = (phaseAcc >> 24) - 128;
+  }
+  else if (wavetype == 1) {
+    //Square
+    Vout = (phaseAcc >> 24) > 128 ? -128 : 127;
+  }
+  else if (wavetype == 2) {
+    //Triangle
+    if ( (phaseAcc >> 24) >= 128) {
+      Vout = ( (255 - (phaseAcc >> 24)) * 2) - 128;
+    }
+    else{
+      //equivalent to phaseAcc >> 24 * 2
+      Vout = (phaseAcc >> 23) - 128;
+    }
+  }
+
+  else if (wavetype == 3) {
+    //sinusoid
+    int idx;
+
+    if ( (phaseAcc >> 24) >= 128) {
+      idx = 255 - (phaseAcc >> 24);
+    }
+    else{
+      idx = phaseAcc >> 24;
+    }
+
+    Vout = sinetable[idx] - 128;
+  }
+
 
   Vout = Vout >> (8 - Volume.value);
+
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -106,6 +158,7 @@ void scanKeysTask(void * pvParameters) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   uint8_t keys;
+  int wavetype;
 
   //CAN BUS
   uint8_t TX_Message[8] = {0};
@@ -137,6 +190,7 @@ void scanKeysTask(void * pvParameters) {
 
     Volume.read_knob();
     Octave.read_knob();
+    Waveform.read_knob();
 
     TX_Message[0] = 'p';
     TX_Message[1] = Octave.value;
@@ -182,8 +236,11 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.drawStr(25, 30, "O: ");
     u8g2.setCursor(40,30);
     u8g2.print(Octave.value);
+    u8g2.drawStr(50, 30, "W: ");
+    u8g2.setCursor(65,30);
+    u8g2.print(Waveform.value);
 
-    u8g2.setCursor(66,30);
+    u8g2.setCursor(75,30);
     u8g2.print((char) RX_Message[0]);
     u8g2.print(RX_Message[1]);
     u8g2.print(RX_Message[2]);
