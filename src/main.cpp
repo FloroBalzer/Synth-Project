@@ -50,6 +50,7 @@
 
   //Knobs
   Knob Volume(8, 8, 0, 3);
+  Knob Octave(0, 3, -3, 2);
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -110,7 +111,7 @@ void scanKeysTask(void * pvParameters) {
   
     __atomic_store_n(&step, 12, __ATOMIC_RELAXED);
 
-    for (uint8_t i = 0; i < 4; i++) {
+    for (uint8_t i = 0; i < 5; i++) {
       setRow(i);
       delayMicroseconds(3);
       keys = readCols();
@@ -131,7 +132,7 @@ void scanKeysTask(void * pvParameters) {
     }
 
     Volume.read_knob();
-
+    Octave.read_knob();
   }
 }
 
@@ -154,9 +155,12 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.print(" ");
     u8g2.print(keyArray[0], HEX);
     u8g2.drawStr(2, 10, notes[step].c_str());
-    u8g2.drawStr(2, 30, "Volume: ");
-    u8g2.setCursor(52,30);
+    u8g2.drawStr(2, 30, "V: ");
+    u8g2.setCursor(15,30);
     u8g2.print(Volume.value);
+    u8g2.drawStr(25, 30, "O: ");
+    u8g2.setCursor(40,30);
+    u8g2.print(Octave.value);
     u8g2.sendBuffer();  // transfer internal memory to the display
     xSemaphoreGive(keyArrayMutex);
 

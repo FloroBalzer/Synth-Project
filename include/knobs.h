@@ -47,16 +47,17 @@ class Knob{
                     b_current = keyArray[4] & 1;
                     break;
                 case 1:
-                    a_current = keyArray[4] & 8;
-                    b_current = keyArray[4] & 4;
+                    a_current = (keyArray[4] & 8) >> 2;
+                    b_current = (keyArray[4] & 4) >> 2;
+
                     break;
                 case 2:
                     a_current = keyArray[3] & 2;
                     b_current = keyArray[3] & 1;
                     break;
                 case 3:
-                    a_current = keyArray[3] & 8;
-                    b_current = keyArray[3] & 4;
+                    a_current = (keyArray[3] & 8) >> 2;
+                    b_current = (keyArray[3] & 4) >> 2;
                     break;
                 default:
                     break;
@@ -69,10 +70,10 @@ class Knob{
 
             else {
 
-                if( ((a_current << 1) | b_current) == 0 || ((a_current << 1) | b_current) >> 2 == 3) {
+                if( (b_current | a_current) == 0 || (b_current | a_current) == 3) {
                     direction = -1;
                 }
-                else if(((a_current << 1) | b_current) >> 2 == 1 || ((a_current << 1) | b_current) >> 2 == 2) {
+                else if( (b_current  | a_current) == 1 || (b_current | a_current) == 2) {
                     direction = 1;
                 }
             }
