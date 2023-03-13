@@ -50,7 +50,7 @@
 
   //Knobs
   Knob Volume(8, 8, 0, 3);
-  Knob Octave(0, 3, -3, 2);
+  Knob Octave(0, 3, 0, 2);
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -69,8 +69,8 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 
 void sampleISR() {
   static uint32_t phaseAcc = 0;
-  phaseAcc += currentStepSize;
 
+  phaseAcc += currentStepSize << Octave.value;
 
   int32_t Vout = (phaseAcc >> 24) - 128;
 
