@@ -95,344 +95,255 @@ void sampleISR()
       if (currentStepSize[i] != 0)
       {
         phaseAcc[i] += currentStepSize[i];
-        Vout += (phaseAcc[i] >> 24) - 128;
+        Vout += (phaseAcc[i] >> 24 + 128);
       }
     }
+    
 
-    int wavetype = Waveform.value;
-    int32_t Vout;
-
-    if (wavetype == 0)
-    {
-      /// Sawtooth
-      for (int i = 0; i < n; i++)
-      {
-        if (currentStepSize[i] != 0)
-        {
-          phaseAcc[i] += currentStepSize[i];
-          Vout += (phaseAcc[i] >> 24) - 128;
-        }
-      }
-      // Sawtooth
-    }
-    else if (wavetype == 1)
-    {
-      // Square
-
-      for (int i = 0; i < n; i++)
-      {
-        if (currentStepSize[i] != 0)
-        {
-          phaseAcc[i] += currentStepSize[i];
-          Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
-        }
-      }
-    }
-    else if (wavetype == 2)
-    {
-      for (int i = 0; i < n; i++)
-      {
-        if ((phaseAcc[i] >> 24) >= 128)
-        {
-          if (currentStepSize[i] != 0)
-          {
-            phaseAcc[i] += currentStepSize[i];
-            Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 128;
-          }
-        }
-        // Triangle
-        else
-        {
-          if (currentStepSize[i] != 0)
-          {
-            phaseAcc[i] += currentStepSize[i];
-            Vout += (phaseAcc[i] >> 23) - 128;
-          }
-        }
-      }
-    }
-    // else if (wavetype == 3)
-    // {
-    //   // sinusoid
-    //   int idx;
-    //   for (int i = 0; i < n; i++)
-    //   {
-    //     if (currentStepSize[i] != 0)
-    //     {
-    //       phaseAcc[i] += currentStepSize[i];
-    //       Vout += (phaseAcc[i] >> 24) - 128;
-    //     }
-
-    //     if ((phaseAcc >> 24) >= 128)
-    //     {
-    //       idx = 255 - (phaseAcc >> 24);
-    //     }
-    //     else
-    //     {
-    //       idx = phaseAcc >> 24;
-    //     }
-
-    //     Vout = sinetable[idx] - 128;
-    //   }
-    // }
-    // Vout = Vout >> (8 - Volume.value);
-
-    analogWrite(OUTR_PIN, Vout + 128);
+    analogWrite(OUTR_PIN, Vout - 128);
   }
-  void setRow(uint8_t rowIdx)
+}
+void setRow(uint8_t rowIdx)
+{
+  digitalWrite(REN_PIN, LOW);
+  unsigned char RA2 = rowIdx & 0b00000100; // RA2
+  unsigned char RA1 = rowIdx & 0b00000010; // RA1
+  unsigned char RA0 = rowIdx & 0b00000001; // RA2
+  digitalWrite(RA2_PIN, RA2);
+  digitalWrite(RA1_PIN, RA1);
+  digitalWrite(RA0_PIN, RA0);
+  digitalWrite(REN_PIN, HIGH);
+}
+
+uint8_t readCols()
+{
+  int a = digitalRead(C0_PIN);
+  int b = digitalRead(C1_PIN);
+  int c = digitalRead(C2_PIN);
+  int d = digitalRead(C3_PIN);
+  uint8_t colout = (a << 3) | (b << 2) | (c << 1) | (d);
+  return colout;
+}
+// void generateMSG(volatile uint8_t *)
+// {
+// }
+
+// void CAN_RX_ISR(void)
+// {
+//   uint8_t RX_Message_ISR[8];
+//   uint32_t ID;
+//   CAN_RX(ID, RX_Message_ISR);
+//   xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+// }
+
+// void CAN_TX_ISR(void)
+// {
+//   xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
+// }
+
+void scanKeysTask(void *pvParameters)
+{
+
+  const TickType_t xFrequency = 20 / portTICK_PERIOD_MS;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+
+  uint8_t keys;
+
+  // CAN BUS
+  // uint8_t TX_Message[8] = {0};
+
+  while (1)
   {
-    digitalWrite(REN_PIN, LOW);
-    unsigned char RA2 = rowIdx & 0b00000100; // RA2
-    unsigned char RA1 = rowIdx & 0b00000010; // RA1
-    unsigned char RA0 = rowIdx & 0b00000001; // RA2
-    digitalWrite(RA2_PIN, RA2);
-    digitalWrite(RA1_PIN, RA1);
-    digitalWrite(RA0_PIN, RA0);
-    digitalWrite(REN_PIN, HIGH);
-  }
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
-  uint8_t readCols()
-  {
-    int a = digitalRead(C0_PIN);
-    int b = digitalRead(C1_PIN);
-    int c = digitalRead(C2_PIN);
-    int d = digitalRead(C3_PIN);
-    uint8_t colout = (a << 3) | (b << 2) | (c << 1) | (d);
-    return colout;
-  }
-  // void generateMSG(volatile uint8_t *)
-  // {
-  // }
+    __atomic_store_n(&step, 12, __ATOMIC_RELAXED);
 
-  // void CAN_RX_ISR(void)
-  // {
-  //   uint8_t RX_Message_ISR[8];
-  //   uint32_t ID;
-  //   CAN_RX(ID, RX_Message_ISR);
-  //   xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
-  // }
-
-  // void CAN_TX_ISR(void)
-  // {
-  //   xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
-  // }
-
-  void scanKeysTask(void *pvParameters)
-  {
-
-    const TickType_t xFrequency = 20 / portTICK_PERIOD_MS;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-
-    uint8_t keys;
-    int wavetype;
-
-    // CAN BUS
-    // uint8_t TX_Message[8] = {0};
-
-    while (1)
+    for (uint8_t i = 0; i < 3; i++)
     {
-      vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
-      __atomic_store_n(&step, 12, __ATOMIC_RELAXED);
-
-      for (uint8_t i = 0; i < 3; i++)
-      {
-        setRow(i);
-        delayMicroseconds(3);
-        keys = readCols();
-
-        xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-        keyArray[i] = keys;
-        // std::cout << keyArray[i] << std::endl;
-        xSemaphoreGive(keyArrayMutex);
-
-        for (uint8_t j = 0; j < 4; j++)
-        {
-          if (!((keys >> j) & 1))
-          {
-            __atomic_store_n(&currentStepSize[3 - j + 4 * i], stepSizes[3 - j + 4 * i], __ATOMIC_RELAXED);
-          }
-          else
-          {
-            __atomic_store_n(&currentStepSize[3 - j + 4 * i], 0, __ATOMIC_RELAXED);
-          }
-        }
-
-        if (keyArray[0] == 0xf && keyArray[1] == 0xf && keyArray[2] == 0xf && keyArray[3] == 0xf && keyArray[4] == 0xf && keyArray[5] == 0xf && keyArray[6] == 0xf && keyArray[7] == 0xf && keyArray[8] == 0xf && keyArray[9] == 0xf && keyArray[10] == 0xf && keyArray[11] == 0xf && keyArray[12] == 0xf)
-        {
-          keypressed = false;
-        }
-        else
-        {
-          keypressed = true;
-        }
-      }
-
-      Volume.read_knob();
-      Octave.read_knob();
-      Waveform.read_knob();
-
-      TX_Message[0] = 'p';
-      TX_Message[1] = Octave.value;
-      TX_Message[2] = step;
-
-      CAN_TX(0x123, TX_Message);
-    }
-    Volume.read_knob();
-    Octave.read_knob();
-
-    // TX_Message[0] = 'p';
-    // TX_Message[1] = Octave.value;
-    // TX_Message[2] = step;
-
-    // CAN_TX(0x123, TX_Message);
-  }
-
-  void displayUpdateTask(void *pvParameters)
-  {
-    const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-
-    // // CAN Bus
-    // uint32_t ID;
-    // uint8_t RX_Message[8] = {0};
-
-    while (1)
-    {
-      vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
-      // while (CAN_CheckRXLevel())
-      // {
-      //   CAN_RX(ID, RX_Message);
-      // }
-
-      // Update display
-      u8g2.clearBuffer();                 // clear the internal memory
-      u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+      setRow(i);
+      delayMicroseconds(3);
+      keys = readCols();
 
       xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-      u8g2.drawStr(2, 10, notes[step].c_str());
-
-      u8g2.setCursor(2, 20);
-      u8g2.print(keyArray[2], HEX);
-      u8g2.print(" ");
-      u8g2.print(keyArray[1], HEX);
-      u8g2.print(" ");
-      u8g2.print(keyArray[0], HEX);
-
-      u8g2.drawStr(2, 30, "V: ");
-      u8g2.setCursor(15, 30);
-      u8g2.print(Volume.value);
-      u8g2.drawStr(25, 30, "O: ");
-      u8g2.setCursor(40, 30);
-      u8g2.print(Octave.value);
-      u8g2.drawStr(50, 30, "W: ");
-      u8g2.setCursor(65, 30);
-      u8g2.print(Waveform.value);
-
-      u8g2.setCursor(75, 30);
-      u8g2.print((char)RX_Message[0]);
-      u8g2.print(RX_Message[1]);
-      u8g2.print(RX_Message[2]);
-
-      u8g2.sendBuffer(); // transfer internal memory to the display
+      keyArray[i] = keys;
       xSemaphoreGive(keyArrayMutex);
 
-      // Toggle LED
-      digitalToggle(LED_BUILTIN);
+      for (uint8_t j = 0; j < 4; j++)
+      {
+        if (!((keys >> j) & 1))
+        {
+          __atomic_store_n(&currentStepSize[3 - j + 4 * i], stepSizes[3 - j + 4 * i], __ATOMIC_RELAXED);
+        }
+        else
+        {
+          __atomic_store_n(&currentStepSize[3 - j + 4 * i], 0, __ATOMIC_RELAXED);
+        }
+      }
     }
-  }
+    int key_loop = 0xf;
+    for (int i = 0; i < 8; i++)
+    {
+      key_loop = keyArray[i] & key_loop;
+    }
+    if (key_loop == 0xf)
+      keypressed = false;
+    else
+      keypressed = true;
 
-  // void decodeTask(void *pvParameters)
-  // {
-  //   while (1)
-  //   {
-  //     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
-  //   }
-  // }
-  void setup()
+    /// for each key
+  }
+  Volume.read_knob();
+  Octave.read_knob();
+
+  // TX_Message[0] = 'p';
+  // TX_Message[1] = Octave.value;
+  // TX_Message[2] = step;
+
+  // CAN_TX(0x123, TX_Message);
+}
+
+void displayUpdateTask(void *pvParameters)
+{
+  const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+
+  // // CAN Bus
+  // uint32_t ID;
+  // uint8_t RX_Message[8] = {0};
+
+  while (1)
   {
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
-    // Set pin directions
-    pinMode(RA0_PIN, OUTPUT);
-    pinMode(RA1_PIN, OUTPUT);
-    pinMode(RA2_PIN, OUTPUT);
-    pinMode(REN_PIN, OUTPUT);
-    pinMode(OUT_PIN, OUTPUT);
-    pinMode(OUTL_PIN, OUTPUT);
-    pinMode(OUTR_PIN, OUTPUT);
-    pinMode(LED_BUILTIN, OUTPUT);
+    // while (CAN_CheckRXLevel())
+    // {
+    //   CAN_RX(ID, RX_Message);
+    // }
 
-    pinMode(C0_PIN, INPUT);
-    pinMode(C1_PIN, INPUT);
-    pinMode(C2_PIN, INPUT);
-    pinMode(C3_PIN, INPUT);
-    pinMode(JOYX_PIN, INPUT);
-    pinMode(JOYY_PIN, INPUT);
+    // Update display
+    u8g2.clearBuffer();                 // clear the internal memory
+    u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
 
-    // Initialise display
-    setOutMuxBit(DRST_BIT, LOW); // Assert display logic reset
-    delayMicroseconds(2);
-    setOutMuxBit(DRST_BIT, HIGH); // Release display logic reset
-    u8g2.begin();
-    setOutMuxBit(DEN_BIT, HIGH); // Enable display power supply
+    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+    u8g2.drawStr(2, 10, notes[step].c_str());
 
-    // Initialise UART
-    Serial.begin(9600);
+    u8g2.setCursor(2, 20);
+    u8g2.print(keyArray[2], HEX);
+    u8g2.print(" ");
+    u8g2.print(keyArray[1], HEX);
+    u8g2.print(" ");
+    u8g2.print(keyArray[0], HEX);
 
-    // settimer
-    TIM_TypeDef *Instance = TIM1;
-    HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-    sampleTimer->setOverflow(22000, HERTZ_FORMAT);
-    sampleTimer->attachInterrupt(sampleISR);
-    sampleTimer->resume();
+    u8g2.drawStr(2, 30, "V: ");
+    u8g2.setCursor(15, 30);
+    u8g2.print(Volume.value);
+    u8g2.drawStr(25, 30, "O: ");
+    u8g2.setCursor(40, 30);
+    u8g2.print(Octave.value);
 
-    // // Initialise CAN
-    // CAN_Init(true);
-    // setCANFilter(0x123, 0x7ff);
-    // CAN_RegisterRX_ISR(CAN_RX_ISR);
-    // CAN_RegisterTX_ISR(CAN_TX_ISR);
-    // CAN_Start();
-    // CAN_Start();
+    // u8g2.setCursor(66, 30);
+    // u8g2.print((char)RX_Message[0]);
+    // u8g2.print(RX_Message[1]);
+    // u8g2.print(RX_Message[2]);
 
-    // // Initialise queue handler
-    // msgInQ = xQueueCreate(36, 8);
-    // msgOutQ = xQueueCreate(36, 8);
+    u8g2.sendBuffer(); // transfer internal memory to the display
+    xSemaphoreGive(keyArrayMutex);
 
-    TaskHandle_t scanKeysHandle = NULL;
-    xTaskCreate(
-        scanKeysTask,     /* Function that implements the task */
-        "scanKeys",       /* Text name for the task */
-        64,               /* Stack size in words, not bytes */
-        NULL,             /* Parameter passed into the task */
-        2,                /* Task priority */
-        &scanKeysHandle); /* Pointer to store the task handle */
-
-    TaskHandle_t displayUpdateHandle = NULL;
-    xTaskCreate(
-        displayUpdateTask,     /* Function that implements the task */
-        "displayUpdate",       /* Text name for the task */
-        256,                   /* Stack size in words, not bytes */
-        NULL,                  /* Parameter passed into the task */
-        1,                     /* Task priority */
-        &displayUpdateHandle); /* Pointer to store the task handle */
-
-    // Initialise Decode loop
-    // TaskHandle_t decodeHandle = NULL;
-    // xTaskCreate(
-    //     decodeTask,   /* Function that implements the task */
-    //     "decode",     /* Text name for the task */
-    //     256,          /* Stack size in words, not bytes */
-    //     NULL,         /* Parameter passed into the task */
-    //     1,            /* Task priority */
-    //     &decodeHandle /* Pointer to store the task handle */
-    // );
-
-    keyArrayMutex = xSemaphoreCreateMutex();
-
-    vTaskStartScheduler();
+    // Toggle LED
+    digitalToggle(LED_BUILTIN);
   }
+}
 
-  void loop()
-  {
-  }
+// void decodeTask(void *pvParameters)
+// {
+//   while (1)
+//   {
+//     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+//   }
+// }
+void setup()
+{
+
+  // Set pin directions
+  pinMode(RA0_PIN, OUTPUT);
+  pinMode(RA1_PIN, OUTPUT);
+  pinMode(RA2_PIN, OUTPUT);
+  pinMode(REN_PIN, OUTPUT);
+  pinMode(OUT_PIN, OUTPUT);
+  pinMode(OUTL_PIN, OUTPUT);
+  pinMode(OUTR_PIN, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  pinMode(C0_PIN, INPUT);
+  pinMode(C1_PIN, INPUT);
+  pinMode(C2_PIN, INPUT);
+  pinMode(C3_PIN, INPUT);
+  pinMode(JOYX_PIN, INPUT);
+  pinMode(JOYY_PIN, INPUT);
+
+  // Initialise display
+  setOutMuxBit(DRST_BIT, LOW); // Assert display logic reset
+  delayMicroseconds(2);
+  setOutMuxBit(DRST_BIT, HIGH); // Release display logic reset
+  u8g2.begin();
+  setOutMuxBit(DEN_BIT, HIGH); // Enable display power supply
+
+  // Initialise UART
+  Serial.begin(9600);
+
+  // settimer
+  TIM_TypeDef *Instance = TIM1;
+  HardwareTimer *sampleTimer = new HardwareTimer(Instance);
+  sampleTimer->setOverflow(22000, HERTZ_FORMAT);
+  sampleTimer->attachInterrupt(sampleISR);
+  sampleTimer->resume();
+
+  // // Initialise CAN
+  // CAN_Init(true);
+  // setCANFilter(0x123, 0x7ff);
+  // CAN_RegisterRX_ISR(CAN_RX_ISR);
+  // CAN_RegisterTX_ISR(CAN_TX_ISR);
+  // CAN_Start();
+  // CAN_Start();
+
+  // // Initialise queue handler
+  // msgInQ = xQueueCreate(36, 8);
+  // msgOutQ = xQueueCreate(36, 8);
+
+  TaskHandle_t scanKeysHandle = NULL;
+  xTaskCreate(
+      scanKeysTask,     /* Function that implements the task */
+      "scanKeys",       /* Text name for the task */
+      64,               /* Stack size in words, not bytes */
+      NULL,             /* Parameter passed into the task */
+      2,                /* Task priority */
+      &scanKeysHandle); /* Pointer to store the task handle */
+
+  TaskHandle_t displayUpdateHandle = NULL;
+  xTaskCreate(
+      displayUpdateTask,     /* Function that implements the task */
+      "displayUpdate",       /* Text name for the task */
+      256,                   /* Stack size in words, not bytes */
+      NULL,                  /* Parameter passed into the task */
+      1,                     /* Task priority */
+      &displayUpdateHandle); /* Pointer to store the task handle */
+
+  // Initialise Decode loop
+  // TaskHandle_t decodeHandle = NULL;
+  // xTaskCreate(
+  //     decodeTask,   /* Function that implements the task */
+  //     "decode",     /* Text name for the task */
+  //     256,          /* Stack size in words, not bytes */
+  //     NULL,         /* Parameter passed into the task */
+  //     1,            /* Task priority */
+  //     &decodeHandle /* Pointer to store the task handle */
+  // );
+
+  keyArrayMutex = xSemaphoreCreateMutex();
+
+  vTaskStartScheduler();
+}
+
+void loop()
+{
+}
