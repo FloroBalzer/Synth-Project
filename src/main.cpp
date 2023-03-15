@@ -45,7 +45,12 @@ volatile uint32_t currentStepSize;
 volatile int step;
 
 //
-bool reciever = true;
+bool receiver = true;
+uint8_t position;
+bool position_set;
+
+bool east;
+bool west;
 
 //CAN Bus
 uint8_t RX_Message[8] = {0};
@@ -93,47 +98,48 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 void sampleISR() {
   static uint32_t phaseAcc = 0;
 
-  phaseAcc += currentStepSize;
+  if(receiver) {
+    phaseAcc += currentStepSize;
 
-  int wavetype = Waveform.value;
-  int32_t Vout;
+    int wavetype = Waveform.value;
+    int32_t Vout;
 
-  if (wavetype == 0) {
-    //Sawtooth
-    Vout = (phaseAcc >> 24) - 128;
-  }
-  else if (wavetype == 1) {
-    //Square
-    Vout = (phaseAcc >> 24) > 128 ? -128 : 127;
-  }
-  else if (wavetype == 2) {
-    //Triangle
-    if ( (phaseAcc >> 24) >= 128) {
-      Vout = ( (255 - (phaseAcc >> 24)) * 2) - 128;
+    if (wavetype == 0) {
+      //Sawtooth
+      Vout = (phaseAcc >> 24) - 128;
     }
-    else{
-      //equivalent to phaseAcc >> 24 * 2
-      Vout = (phaseAcc >> 23) - 128;
+    else if (wavetype == 1) {
+      //Square
+      Vout = (phaseAcc >> 24) > 128 ? -128 : 127;
     }
-  }
-
-  else if (wavetype == 3) {
-    //sinusoid
-    int idx;
-
-    if ( (phaseAcc >> 24) >= 128) {
-      idx = 255 - (phaseAcc >> 24);
-    }
-    else{
-      idx = phaseAcc >> 24;
+    else if (wavetype == 2) {
+      //Triangle
+      if ( (phaseAcc >> 24) >= 128) {
+        Vout = ( (255 - (phaseAcc >> 24)) * 2) - 128;
+      }
+      else{
+        //equivalent to phaseAcc >> 24 * 2
+        Vout = (phaseAcc >> 23) - 128;
+      }
     }
 
-    Vout = sinetable[idx] - 128;
+    else if (wavetype == 3) {
+      //sinusoid
+      int idx;
+
+      if ( (phaseAcc >> 24) >= 128) {
+        idx = 255 - (phaseAcc >> 24);
+      }
+      else{
+        idx = phaseAcc >> 24;
+      }
+      Vout = sinetable[idx] - 128;
+    }
+
+    Vout = Vout >> (8 - Volume.value);
+
+    analogWrite(OUTR_PIN, Vout + 128);
   }
-
-  Vout = Vout >> (8 - Volume.value);
-
-  analogWrite(OUTR_PIN, Vout + 128);
 }
 
 void CAN_RX_ISR (void) {
@@ -178,7 +184,7 @@ void scanKeysTask(void * pvParameters) {
 
   int local_key;
   int local_stepsize;
-  //CAN BUS
+
   uint8_t TX_Message[8] = {0};
 
   while(1) {
@@ -186,7 +192,8 @@ void scanKeysTask(void * pvParameters) {
   
     __atomic_store_n(&step, 12, __ATOMIC_RELAXED);
 
-    for (uint8_t i = 0; i < 5; i++) {
+    for (uint8_t i = 0; i < 7; i++) {
+      
       setRow(i);
       delayMicroseconds(3);
       keys = readCols();
@@ -203,8 +210,22 @@ void scanKeysTask(void * pvParameters) {
           }
         }
       }
-      // local_stepsize = stepSizes[step] << (Octave.value - 4);
-      // __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
+      else if(i==5) {
+        if(~keys & 1) {
+          west = true;  
+        }
+        else{
+          west = false;
+        }
+      }
+      else if(i==6) {
+        if(~keys & 1) {
+          east = true;  
+        }
+        else{
+          east = false;
+        }
+      }
     }
 
     Volume.read_knob();
@@ -250,6 +271,10 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.print(" ");
     u8g2.print(keyArray[0], HEX);
 
+    receiver ? u8g2.drawStr(66,20,"Receiver") : u8g2.drawStr(66,20,"Sender");
+    u8g2.setCursor(120,20);
+    u8g2.print(position, HEX);
+
     u8g2.drawStr(2, 30, "V: ");
     u8g2.setCursor(15,30);
     u8g2.print(Volume.value);
@@ -268,18 +293,38 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.sendBuffer();  // transfer internal memory to the display
     xSemaphoreGive(keyArrayMutex);
 
-
     //Toggle LED
     digitalToggle(LED_BUILTIN);
   }
-
 }
+
+void broadcastPosition() {
+  uint8_t TX_Message[8] = {0};
+
+  TX_Message[0] = 'H';
+  TX_Message[1] = 0;
+  TX_Message[2] = position;
+
+  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+}
+
+void broadcastEndHandshake() {
+  uint8_t TX_Message[8] = {0};
+
+  if(position != 0) {
+    receiver = false;
+  }
+  Octave.set_value(position + 4);
+  TX_Message[0] = 'E';
+  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+}
+
 
 void decodeTask(void * pvParameters) {
   bool external_pressed;
 
   int local_stepsize;
-  int octave;
+  int relative_octive;
 
   while(1) {
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
@@ -287,25 +332,50 @@ void decodeTask(void * pvParameters) {
     switch(RX_Message[0]) {
       case 'R':
         external_pressed = false;
+        Octave.set_value(RX_Message[1] + position);
         local_stepsize = stepSizes[12];
         __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
+        Octave.set_value(RX_Message[1] + position);
         break;
       
       case 'P':
         external_pressed = true;
-        octave = RX_Message[1] - 4;
-        if(octave > 0){
-          local_stepsize = stepSizes[RX_Message[2]] << octave;
+        Octave.set_value(RX_Message[1] + position);
+        relative_octive = Octave.value - 4;
+        if(relative_octive > 0){
+          local_stepsize = stepSizes[RX_Message[2]] << relative_octive;
         }
         else{
-          local_stepsize = stepSizes[RX_Message[2]] >> abs(octave);
+          local_stepsize = stepSizes[RX_Message[2]] >> abs(relative_octive);
         }
         __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
         break;
+
+      case 'H':
+      Serial.println(RX_Message[0]);
+        if(!west) {
+          if(!position_set) {
+            position = RX_Message[2] + 1;
+            position_set = true;
+          }
+          if(!east) {
+            broadcastEndHandshake();
+          }
+          else{
+            setOutMuxBit(HKOW_BIT, LOW);
+            broadcastPosition();
+          }
+        }
+        break;
+      case 'E':
+        if(position == 0) {
+          receiver = true;
+        }
+        else {
+          position = false;
+        }
+        Octave.set_value(position + 4);
     }
-
-
-
   }
 }
 
@@ -316,6 +386,43 @@ void CAN_TX_Task (void * pvParameters) {
 		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
 		CAN_TX(0x123, msgOut);
 	}
+}
+
+void checkBoards() {
+  if(~keyArray[5] & 1) {
+    west = true;
+    Serial.println("Connected West");
+  }
+  else if(~keyArray[6] & 1) {
+    east = true;
+    Serial.println("Connected East");
+
+  }
+
+  if(!west) {
+    //leftmost board
+    position = 0;
+    position_set = true;
+    Serial.println("Leftmost board");
+
+    if(!east) {
+      //Only one module - end handshake
+      Serial.println("Only One Module");
+      CAN_Init(true);
+    }
+  }
+}
+
+void initialHandshake() {
+  if(position_set) {
+    if(!east) {
+      Octave.set_value(position+4);
+    }
+    else{
+      setOutMuxBit(HKOW_BIT, LOW);
+      broadcastPosition();
+    }
+  }
 }
 
 void setup() {
@@ -356,10 +463,10 @@ void setup() {
 
   //Initialise CAN
   CAN_Init(false);
+  // CAN_Init(true);
   setCANFilter(0x123,0x7ff);
   CAN_RegisterRX_ISR(CAN_RX_ISR);
   CAN_RegisterTX_ISR(CAN_TX_ISR);
-  CAN_Start();
 
   //Initialise Queues
   msgInQ = xQueueCreate(36,8);
@@ -405,6 +512,21 @@ void setup() {
   NULL,			/* Parameter passed into the task */
   1,			/* Task priority */
   &txHandle );
+
+  //initialise handshake
+  setOutMuxBit(HKOW_BIT, HIGH);  //Enable west handshake
+  setOutMuxBit(HKOE_BIT, HIGH);  //Enable east handshake
+  for(int i = 5; i <= 6; i++) {
+    setRow(i);
+    delayMicroseconds(2);
+    keyArray[i] = readCols();
+  }
+
+  delayMicroseconds(1000000); //wait 1 sec for other boards to start
+  checkBoards();
+  CAN_Start();
+  delayMicroseconds(1000000);
+  initialHandshake();
 
   vTaskStartScheduler();
 }
