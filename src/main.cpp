@@ -355,7 +355,7 @@ void setup() {
   sampleTimer->resume();
 
   //Initialise CAN
-  CAN_Init(true);
+  CAN_Init(false);
   setCANFilter(0x123,0x7ff);
   CAN_RegisterRX_ISR(CAN_RX_ISR);
   CAN_RegisterTX_ISR(CAN_TX_ISR);
