@@ -44,6 +44,8 @@ volatile int32_t vstep = 0;
 volatile int32_t bstep = 0;
 volatile int joyY=490;
 volatile int joyX=563;
+volatile int joyXbias;
+volatile int joyYbias;
 
 //Step Size Array
 const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
@@ -93,17 +95,25 @@ void sampleISR() {
   //start vib
   if(currentStepSize != 0){
  
-  int bend = abs(joyX-563);
+  int bend = abs(joyX-joyXbias);
    if(bend<28){
     bend = 28;
    }
-   if(joyX>563){
+   if(joyX>joyXbias){
       bstep = bend*17961;
    }
-   if(joyX<=563){
+   if(joyX<=joyXbias){
       bstep = bend*-17961;
    }
+   if(bend < 50){
+    bstep = 0;
+   }
+  
 }
+else{
+    bstep = 0;
+  }
+
 
    
   
@@ -290,7 +300,7 @@ void vibratoTask(void * pvParameters){
     int t =1;
 
   while(currentStepSize != 0){
-       int center = abs(joyY-490);
+       int center = abs(joyY-joyYbias);
     //y of joystick min 900 max 138 mid 490
       
     int i =center*2439;
@@ -348,6 +358,8 @@ void setup() {
   //Initialise UART
   Serial.begin(9600);
 
+  
+
   //settimer
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
@@ -387,6 +399,8 @@ void setup() {
   1,			/* Task priority */
   &vibratoHandle );/* Pointer to store the task handle */
 
+  joyXbias = analogRead(A1);
+  joyYbias = analogRead(A0);
   keyArrayMutex = xSemaphoreCreateMutex();
 
   vTaskStartScheduler();
