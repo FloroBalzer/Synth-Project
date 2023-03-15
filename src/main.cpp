@@ -179,7 +179,8 @@ void scanKeysTask(void *pvParameters)
           __atomic_store_n(&currentStepSize[3 - j + 4 * i], 0, __ATOMIC_RELAXED);
         }
       }
-      if (keyArray[0] == 0xf && keyArray[1] == 0xf && keyArray[2] == 0xf)
+
+      if (keyArray[0] == 0xf && keyArray[1] == 0xf && keyArray[2] == 0xf && keyArray[3] == 0xf && keyArray[4] == 0xf && keyArray[5] == 0xf && keyArray[6] == 0xf && keyArray[7] == 0xf && keyArray[8] == 0xf && keyArray[9] == 0xf && keyArray[10] == 0xf && keyArray[11] == 0xf && keyArray[12] == 0xf)
       {
         keypressed = false;
       }
@@ -188,6 +189,7 @@ void scanKeysTask(void *pvParameters)
         keypressed = true;
       }
     }
+
     /// for each key
   }
   Volume.read_knob();
