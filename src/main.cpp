@@ -51,6 +51,7 @@ const std::string notes[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A
 // key Array
 SemaphoreHandle_t keyArrayMutex;
 volatile uint8_t keyArray[7];
+volatile uint8_t key_size = 12;
 
 // Knobs
 Knob Volume(8, 8, 0, 3);
@@ -222,52 +223,52 @@ void sampleISR()
   static uint32_t phaseAcc[12] = {0};
 
   // start bend
-  if (currentStepSize != 0)
-  {
-
-    int bend = abs(joyX - joyXbias);
-    if (bend < 28)
-    {
-      bend = 28;
-    }
-    if (joyX > joyXbias)
-    {
-      bstep = bend * 17961;
-    }
-    if (joyX <= joyXbias)
-    {
-      bstep = bend * -17961;
-    }
-    if (bend < 50)
-    {
-      bstep = 0;
-    }
-  }
-  else
-  {
-    bstep = 0;
-  }
   // end bend
   int wavetype = Waveform.value;
   int32_t Vout = 0;
 
-  for (int i = 0; i < 12; i++)
+  for (int i = 0; i < key_size; i++)
   {
+    if (currentStepSize[i] != 0)
+    {
+
+      int bend = abs(joyX - joyXbias);
+      if (bend < 28)
+      {
+        bend = 28;
+      }
+      if (joyX > joyXbias)
+      {
+        bstep = bend * 17961;
+      }
+      if (joyX <= joyXbias)
+      {
+        bstep = bend * -17961;
+      }
+      if (bend < 50)
+      {
+        bstep = 0;
+      }
+    }
+    else
+    {
+      bstep = 0;
+    }
     if (wavetype == 0)
     {
       // Sawtooth
-      phaseAcc[i] += (currentStepSize[i]+ vstep + bstep) << Octave.value;
+      phaseAcc[i] += (currentStepSize[i] + bstep) << Octave.value;
       Vout += (phaseAcc[i] >> 24) + 128;
     }
     else if (wavetype == 1)
     {
       // Square
-      phaseAcc[i] += (currentStepSize[i]+ vstep + bstep) << Octave.value;
+      phaseAcc[i] += (currentStepSize[i]) << Octave.value;
       Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
     }
     else if (wavetype == 2)
     {
-      phaseAcc[i] += (currentStepSize[i]+ vstep + bstep) << Octave.value;
+      phaseAcc[i] += (currentStepSize[i]) << Octave.value;
       // Triangle
       if ((phaseAcc[i] >> 24) >= 128)
       {
@@ -284,7 +285,7 @@ void sampleISR()
     {
       // sinusoid
       int idx;
-      phaseAcc[i] += (currentStepSize[i]+ vstep + bstep) << Octave.value;
+      phaseAcc[i] += (currentStepSize[i]) << Octave.value;
 
       if ((phaseAcc[i] >> 24) >= 128)
       {
@@ -363,6 +364,15 @@ void scanKeysTask(void *pvParameters)
             __atomic_store_n(&currentStepSize[3 - j + (i * 4)], 0, __ATOMIC_RELAXED);
           }
         }
+        int key_loop = 0xf;
+        for (int i = 0; i < 8; i++)
+        {
+          key_loop = keyArray[i] & key_loop;
+        }
+        if (key_loop == 0xf)
+          keypressed = false;
+        else
+          keypressed = true;
       }
     }
 
@@ -434,6 +444,39 @@ void displayUpdateTask(void *pvParameters)
     digitalToggle(LED_BUILTIN);
   }
 }
+// void vibratoTask(void *pvParameters)
+// {
+//   const TickType_t xFrequency = 10 / portTICK_PERIOD_MS;
+//   TickType_t xLastWakeTime = xTaskGetTickCount();
+//   int v_count = 0;
+//   bool hit_peak = false;
+//   while (1)
+//   {
+
+//     vTaskDelayUntil(&xLastWakeTime, xFrequency);
+//     int t = 1;
+//     {
+//       for (int j; j < key_size; j++)
+//       {
+//         if (currentStepSize[j] != 0)
+//         {
+//           int center = abs(joyY - joyYbias);
+//           // y of joystick min 900 max 138 mid 490
+//           if (!hit_peak)
+//             v_count++;
+//           else
+//             v_count--;
+//           if (v_count == 128)
+//             hit_peak = true;
+//           if (v_count == 0)
+//             hit_peak = false;
+//           vstep = (sinetable[v_count] - 128) * 10e4;
+//           delay()
+//         }
+//       }
+//     }
+//   }
+// }
 
 void setup()
 {
@@ -496,6 +539,18 @@ void setup()
       NULL,                  /* Parameter passed into the task */
       1,                     /* Task priority */
       &displayUpdateHandle); /* Pointer to store the task handle */
+
+  // TaskHandle_t vibratoHandle = NULL;
+  // xTaskCreate(
+  //     vibratoTask,     /* Function that implements the task */
+  //     "vibrato",       /* Text name for the task */
+  //     64,              /* Stack size in words, not bytes */
+  //     NULL,            /* Parameter passed into the task */
+  //     1,               /* Task priority */
+  //     &vibratoHandle); /* Pointer to store the task handle */
+
+  joyXbias = analogRead(A1);
+  joyYbias = analogRead(A0);
 
   keyArrayMutex = xSemaphoreCreateMutex();
 
