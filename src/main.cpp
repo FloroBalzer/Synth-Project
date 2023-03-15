@@ -37,27 +37,33 @@ const int DRST_BIT = 4;
 const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 
-//other
+//Step Size and notes
+const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
+const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
+volatile uint8_t keyArray[7];
 volatile uint32_t currentStepSize;
 volatile int step;
 
-//Step Size Array
-const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
-const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
+//
+bool reciever = true;
 
-//Key Array
+//CAN Bus
+uint8_t RX_Message[8] = {0};
+
+//Queues
+QueueHandle_t msgInQ;
+QueueHandle_t msgOutQ;
+
+//mutex and semaphores
 SemaphoreHandle_t keyArrayMutex;
-volatile uint8_t keyArray[7];
+SemaphoreHandle_t CAN_TX_Semaphore;
 
 //Knobs
 Knob Volume(8, 8, 0, 3);
-Knob Octave(0, 3, 0, 2);
+Knob Octave(4, 7, 1, 2);
 Knob Waveform(0, 3, 0, 1);
 
 //waveforms
-// This is the only wave we set up "by hand"
-// Note: this is the first half of the wave,
-//       the second half is just this mirrored.
 const unsigned char sinetable[128] = {
     0,   0,   0,   0,   1,   1,   1,   2,   2,   3,   4,   5,   5,   6,   7,   9,
    10,  11,  12,  14,  15,  17,  18,  20,  21,  23,  25,  27,  29,  31,  33,  35,
@@ -87,7 +93,7 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 void sampleISR() {
   static uint32_t phaseAcc = 0;
 
-  phaseAcc += currentStepSize << Octave.value;
+  phaseAcc += currentStepSize;
 
   int wavetype = Waveform.value;
   int32_t Vout;
@@ -125,10 +131,20 @@ void sampleISR() {
     Vout = sinetable[idx] - 128;
   }
 
-
   Vout = Vout >> (8 - Volume.value);
 
   analogWrite(OUTR_PIN, Vout + 128);
+}
+
+void CAN_RX_ISR (void) {
+	uint8_t RX_Message_ISR[8];
+	uint32_t ID;
+	CAN_RX(ID, RX_Message_ISR);
+	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+}
+
+void CAN_TX_ISR (void) {
+	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
 }
 
 void setRow(uint8_t rowIdx) {
@@ -160,6 +176,8 @@ void scanKeysTask(void * pvParameters) {
   uint8_t keys;
   int wavetype;
 
+  int local_key;
+  int local_stepsize;
   //CAN BUS
   uint8_t TX_Message[8] = {0};
 
@@ -180,24 +198,31 @@ void scanKeysTask(void * pvParameters) {
       if(i < 3) {
         for (uint8_t j = 0; j < 4; j++) { 
           if (~keys & (1 << j)) {
-              __atomic_store_n(&step, 3-j +(i*4), __ATOMIC_RELAXED);
+              local_key = 3-j +(i*4);
+              __atomic_store_n(&step, local_key, __ATOMIC_RELAXED);
           }
         }
       }
-
-      __atomic_store_n(&currentStepSize, stepSizes[step], __ATOMIC_RELAXED);
+      // local_stepsize = stepSizes[step] << (Octave.value - 4);
+      // __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
     }
 
     Volume.read_knob();
     Octave.read_knob();
     Waveform.read_knob();
 
-    TX_Message[0] = 'p';
-    TX_Message[1] = Octave.value;
-    TX_Message[2] = step;
+    if (step == 12) {
+      TX_Message[0] = 'R';
+      TX_Message[1] = Octave.value;
+    }
+    else{
+      TX_Message[0] = 'P';
+      TX_Message[1] = Octave.value;
+      TX_Message[2] = step;
+    }
 
-    CAN_TX(0x123, TX_Message);
-    
+    // CAN_TX(0x123, TX_Message);
+    xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
   }
 }
 
@@ -207,14 +232,9 @@ void displayUpdateTask(void * pvParameters) {
 
   //CAN Bus
   uint32_t ID;
-  uint8_t RX_Message[8] = {0};
 
   while(1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
-
-    while (CAN_CheckRXLevel()){
-      CAN_RX(ID, RX_Message);
-    }
 
     //Update display
     u8g2.clearBuffer();         // clear the internal memory
@@ -253,6 +273,49 @@ void displayUpdateTask(void * pvParameters) {
     digitalToggle(LED_BUILTIN);
   }
 
+}
+
+void decodeTask(void * pvParameters) {
+  bool external_pressed;
+
+  int local_stepsize;
+  int octave;
+
+  while(1) {
+    xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+
+    switch(RX_Message[0]) {
+      case 'R':
+        external_pressed = false;
+        local_stepsize = stepSizes[12];
+        __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
+        break;
+      
+      case 'P':
+        external_pressed = true;
+        octave = RX_Message[1] - 4;
+        if(octave > 0){
+          local_stepsize = stepSizes[RX_Message[2]] << octave;
+        }
+        else{
+          local_stepsize = stepSizes[RX_Message[2]] >> abs(octave);
+        }
+        __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
+        break;
+    }
+
+
+
+  }
+}
+
+void CAN_TX_Task (void * pvParameters) {
+	uint8_t msgOut[8];
+	while (1) {
+	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+		CAN_TX(0x123, msgOut);
+	}
 }
 
 void setup() {
@@ -294,8 +357,19 @@ void setup() {
   //Initialise CAN
   CAN_Init(true);
   setCANFilter(0x123,0x7ff);
+  CAN_RegisterRX_ISR(CAN_RX_ISR);
+  CAN_RegisterTX_ISR(CAN_TX_ISR);
   CAN_Start();
 
+  //Initialise Queues
+  msgInQ = xQueueCreate(36,8);
+  msgOutQ = xQueueCreate(36,8);
+
+  //mutex and semaphores
+  keyArrayMutex = xSemaphoreCreateMutex();
+  CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
+
+  //Initialise Threads
   TaskHandle_t scanKeysHandle = NULL;
   xTaskCreate(
   scanKeysTask,		/* Function that implements the task */
@@ -314,7 +388,23 @@ void setup() {
   1,			/* Task priority */
   &displayUpdateHandle );	/* Pointer to store the task handle */
 
-  keyArrayMutex = xSemaphoreCreateMutex();
+  TaskHandle_t decodeHandle = NULL;
+  xTaskCreate(
+  decodeTask,		/* Function that implements the task */
+  "decode",		/* Text name for the task */
+  256,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */
+  1,			/* Task priority */
+  &decodeHandle );
+
+  TaskHandle_t txHandle = NULL;
+  xTaskCreate(
+  CAN_TX_Task,		/* Function that implements the task */
+  "tx",		/* Text name for the task */
+  256,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */
+  1,			/* Task priority */
+  &txHandle );
 
   vTaskStartScheduler();
 }
