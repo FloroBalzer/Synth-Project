@@ -212,6 +212,8 @@ void sampleISR()
 {
 
   static uint32_t phaseAcc[12] = {0};
+
+  
   int wavetype = Waveform.value;
   int32_t Vout = 0;
 
@@ -244,7 +246,6 @@ void sampleISR()
         Vout += (phaseAcc[i] >> 23) - 128;
       }
     }
-
     else if (wavetype == 3)
     {
       // sinusoid
