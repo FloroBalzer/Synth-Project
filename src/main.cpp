@@ -57,6 +57,14 @@ Knob Volume(8, 8, 0, 3);
 Knob Octave(0, 3, 0, 2);
 Knob Waveform(0, 3, 0, 1);
 
+// joystick
+volatile int32_t vstep = 0;
+volatile int32_t bstep = 0;
+volatile int joyY = 490;
+volatile int joyX = 563;
+volatile int joyXbias;
+volatile int joyYbias;
+
 // waveforms
 //  This is the only wave we set up "by hand"
 //  Note: this is the first half of the wave,
@@ -213,7 +221,33 @@ void sampleISR()
 
   static uint32_t phaseAcc[12] = {0};
 
-  
+  // start bend
+  if (currentStepSize != 0)
+  {
+
+    int bend = abs(joyX - joyXbias);
+    if (bend < 28)
+    {
+      bend = 28;
+    }
+    if (joyX > joyXbias)
+    {
+      bstep = bend * 17961;
+    }
+    if (joyX <= joyXbias)
+    {
+      bstep = bend * -17961;
+    }
+    if (bend < 50)
+    {
+      bstep = 0;
+    }
+  }
+  else
+  {
+    bstep = 0;
+  }
+  // end bend
   int wavetype = Waveform.value;
   int32_t Vout = 0;
 
@@ -222,18 +256,18 @@ void sampleISR()
     if (wavetype == 0)
     {
       // Sawtooth
-      phaseAcc[i] += currentStepSize[i];
+      phaseAcc[i] += (currentStepSize[i]+ vstep + bstep) << Octave.value;
       Vout += (phaseAcc[i] >> 24) + 128;
     }
     else if (wavetype == 1)
     {
       // Square
-      phaseAcc[i] += currentStepSize[i];
+      phaseAcc[i] += (currentStepSize[i]+ vstep + bstep) << Octave.value;
       Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
     }
     else if (wavetype == 2)
     {
-      phaseAcc[i] += currentStepSize[i];
+      phaseAcc[i] += (currentStepSize[i]+ vstep + bstep) << Octave.value;
       // Triangle
       if ((phaseAcc[i] >> 24) >= 128)
       {
@@ -250,7 +284,7 @@ void sampleISR()
     {
       // sinusoid
       int idx;
-      phaseAcc[i] += currentStepSize[i];
+      phaseAcc[i] += (currentStepSize[i]+ vstep + bstep) << Octave.value;
 
       if ((phaseAcc[i] >> 24) >= 128)
       {
@@ -335,6 +369,8 @@ void scanKeysTask(void *pvParameters)
     Volume.read_knob();
     Octave.read_knob();
     Waveform.read_knob();
+    joyY = analogRead(A0);
+    joyX = analogRead(A1);
 
     TX_Message[0] = 'p';
     TX_Message[1] = Octave.value;
