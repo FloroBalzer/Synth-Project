@@ -39,12 +39,12 @@ const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 
 // other
-volatile uint32_t currentStepSize[13];
+volatile uint32_t currentStepSize[12] = {0};
 volatile int step;
 volatile bool keypressed;
 
 // Step Size Array
-double frequencies[] = {261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392, 415.3, 440, 466.16, 493.88};
+float frequencies[] = {261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392, 415.3, 440, 466.16, 493.88};
 const uint32_t stepSizes[] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0};
 const std::string notes[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Key"};
 
@@ -52,6 +52,7 @@ const std::string notes[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A
 SemaphoreHandle_t keyArrayMutex;
 volatile uint8_t keyArray[7];
 volatile uint8_t key_size = 12;
+volatile uint8_t numKeyPress = 0;
 
 // Knobs
 Knob Volume(8, 8, 0, 3);
@@ -224,7 +225,7 @@ void sampleISR()
 
   // start bend
   // end bend
-  int wavetype = Waveform.value;
+  // int wavetype = Waveform.value;
   int32_t Vout = 0;
 
   for (int i = 0; i < key_size; i++)
@@ -232,77 +233,88 @@ void sampleISR()
     if (currentStepSize[i] != 0)
     {
 
-      int bend = abs(joyX - joyXbias);
-      if (bend < 28)
-      {
-        bend = 28;
-      }
-      if (joyX > joyXbias)
-      {
-        bstep = bend * 17961;
-      }
-      if (joyX <= joyXbias)
-      {
-        bstep = bend * -17961;
-      }
-      if (bend < 50)
-      {
-        bstep = 0;
-      }
-    }
-    else
-    {
-      bstep = 0;
-    }
-    if (wavetype == 0)
-    {
+      //     int bend = abs(joyX - joyXbias);
+      //     if (bend < 28)
+      //     {
+      //       bend = 28;
+      //     }
+      //     if (joyX > joyXbias)
+      //     {
+      //       bstep = bend * 17961;
+      //     }
+      //     if (joyX <= joyXbias)
+      //     {
+      //       bstep = bend * -17961;
+      //     }
+      //     if (bend < 50)
+      //     {
+      //       bstep = 0;
+      //     }
+      //   }
+      //   else
+      //   {
+      //     bstep = 0;
+      //   }
+      // if (wavetype == 0)
+      // {
       // Sawtooth
-      phaseAcc[i] += (currentStepSize[i] + bstep) << Octave.value;
-      Vout += (phaseAcc[i] >> 24) + 128;
-    }
-    else if (wavetype == 1)
-    {
-      // Square
-      phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-      Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
-    }
-    else if (wavetype == 2)
-    {
-      phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-      // Triangle
-      if ((phaseAcc[i] >> 24) >= 128)
-      {
-
-        Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 128;
-      }
-      else
-      {
-        // equivalent to phaseAcc[i] >> 24 * 2
-        Vout += (phaseAcc[i] >> 23) - 128;
-      }
-    }
-    else if (wavetype == 3)
-    {
-      // sinusoid
-      int idx;
-      phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-
-      if ((phaseAcc[i] >> 24) >= 128)
-      {
-        idx = 255 - (phaseAcc[i] >> 24);
-      }
-      else
-      {
-        idx = phaseAcc[i] >> 24;
-      }
-
-      Vout += sinetable[idx] + 128;
+      phaseAcc[i] += (int)(currentStepSize[i]);
+      Vout += (int)(phaseAcc[i] >> 24) - 128;
     }
   }
 
-  Vout = Vout >> (8 - Volume.value);
+  // }
+  // else if (wavetype == 1)
+  // {
+  //   // Square
+  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
+  //   Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
+  // }
+  // else if (wavetype == 2)
+  // {
+  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
+  //   // Triangle
+  //   if ((phaseAcc[i] >> 24) >= 128)
+  //   {
 
-  analogWrite(OUTR_PIN, Vout - 128);
+  //     Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 128;
+  //   }
+  //   else
+  //   {
+  //     // equivalent to phaseAcc[i] >> 24 * 2
+  //     Vout += (phaseAcc[i] >> 23) - 128;
+  //   }
+  // }
+  // else if (wavetype == 3)
+  // {
+  //   // sinusoid
+  //   int idx;
+  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
+
+  //   if ((phaseAcc[i] >> 24) >= 128)
+  //   {
+  //     idx = 255 - (phaseAcc[i] >> 24);
+  //   }
+  //   else
+  //   {
+  //     idx = phaseAcc[i] >> 24;
+  //   }
+
+  //   Vout += sinetable[idx] + 128;
+  // }
+  // }
+
+  Vout = (int)Vout >> (8 - Volume.value);
+  if (Vout > 127)
+  {
+    Vout = 127;
+  }
+  else if (Vout < -128)
+  {
+    Vout = 128;
+  }
+
+  analogWrite(OUTR_PIN, Vout + 128);
 }
 
 void setRow(uint8_t rowIdx)
@@ -328,7 +340,7 @@ uint8_t readCols()
 void scanKeysTask(void *pvParameters)
 {
 
-  const TickType_t xFrequency = 20 / portTICK_PERIOD_MS;
+  const TickType_t xFrequency = 200 / portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   uint8_t keys;
@@ -375,6 +387,10 @@ void scanKeysTask(void *pvParameters)
           keypressed = true;
       }
     }
+    // Serial.println(keyArray[0] & keyArray[1] & keyArray[2]);
+    //   Serial.println(keyArray[i], BIN);
+    // Serial.println(numKeyPress);
+    // Serial.println("br");
 
     Volume.read_knob();
     Octave.read_knob();
