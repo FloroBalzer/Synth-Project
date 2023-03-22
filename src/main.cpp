@@ -41,7 +41,8 @@ const int HKOE_BIT = 6;
 const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
 const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
 volatile uint8_t keyArray[7];
-volatile uint32_t currentStepSize;
+const uint8_t key_size = 36;
+volatile uint32_t currentStepSize[key_size] = {0};
 volatile int step;
 
 //
@@ -49,8 +50,6 @@ bool receiver = true;
 uint8_t position = 8;
 bool position_set;
 
-
-int local_stepsize;
 bool externalKeyPressed;
 
 volatile bool east;
@@ -100,50 +99,85 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 }
 
 void sampleISR() {
-  static uint32_t phaseAcc = 0;
 
-  if(receiver) {
-    phaseAcc += currentStepSize;
+  static uint32_t phaseAcc[key_size] = {0};
 
-    int wavetype = Waveform.value;
-    int32_t Vout;
+  // start bend
+  // end bend
+  int wavetype = Waveform.value;
+  int32_t Vout = 0;
 
-    if (wavetype == 0) {
-      //Sawtooth
-      Vout = (phaseAcc >> 24) - 128;
-    }
-    else if (wavetype == 1) {
-      //Square
-      Vout = (phaseAcc >> 24) > 128 ? -128 : 127;
-    }
-    else if (wavetype == 2) {
-      //Triangle
-      if ( (phaseAcc >> 24) >= 128) {
-        Vout = ( (255 - (phaseAcc >> 24)) * 2) - 128;
+  for (int i = 0; i < key_size; i++) {
+    if (currentStepSize[i] != 0) {
+
+      //     int bend = abs(joyX - joyXbias);
+      //     if (bend < 28)
+      //     {
+      //       bend = 28;
+      //     }
+      //     if (joyX > joyXbias)
+      //     {
+      //       bstep = bend * 17961;
+      //     }
+      //     if (joyX <= joyXbias)
+      //     {
+      //       bstep = bend * -17961;
+      //     }
+      //     if (bend < 50)
+      //     {
+      //       bstep = 0;
+      //     }
+      //   }
+      //   else
+      //   {
+      //     bstep = 0;
+      //   }
+      
+      phaseAcc[i] += (int)(currentStepSize[i]);
+
+      if (wavetype == 0) {
+        // Sawtooth
+        Vout += (int)(phaseAcc[i] >> 24) - 128;
       }
-      else{
-        //equivalent to phaseAcc >> 24 * 2
-        Vout = (phaseAcc >> 23) - 128;
+      else if (wavetype == 1) {
+        // Square
+        Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
+      }
+      else if (wavetype == 2) {
+        // Triangle
+        if ((phaseAcc[i] >> 24) >= 128) {
+          Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 127;
+        }
+        else {
+          // equivalent to phaseAcc[i] >> 24 * 2
+          Vout += (phaseAcc[i] >> 23) - 128;
+        }
+      }
+      else if (wavetype == 3) {
+        // sinusoid
+        int idx;
+
+        if ((phaseAcc[i] >> 24) >= 128) {
+          idx = 255 - (phaseAcc[i] >> 24);
+        }
+        else {
+          idx = phaseAcc[i] >> 24;
+        }
+
+        Vout += sinetable[idx] - 128;
       }
     }
-
-    else if (wavetype == 3) {
-      //sinusoid
-      int idx;
-
-      if ( (phaseAcc >> 24) >= 128) {
-        idx = 255 - (phaseAcc >> 24);
-      }
-      else{
-        idx = phaseAcc >> 24;
-      }
-      Vout = sinetable[idx] - 128;
-    }
-
-    Vout = Vout >> (8 - Volume.value);
-
-    analogWrite(OUTR_PIN, Vout + 128);
   }
+
+  Vout = (int)Vout >> (8 - Volume.value);
+  if (Vout > 127) {
+    Vout = 127;
+  }
+  else if (Vout < -128) {
+    Vout = 128;
+  }
+
+  analogWrite(OUTR_PIN, Vout + 128);
 }
 
 void CAN_RX_ISR (void) {
@@ -184,17 +218,24 @@ void scanKeysTask(void * pvParameters) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   uint8_t keys;
-  int wavetype;
+
+  int vol = 0;
+  int oct = 0;
+  int wavetype = 0;
 
   int local_key;
+  int local_stepsize;
+
+  uint8_t pressed[12] = {0};
+
   int relative_octive;
 
   uint8_t TX_Message[8] = {0};
 
   while(1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
-  
-    __atomic_store_n(&step, 12, __ATOMIC_RELAXED);
+
+    relative_octive = Octave.value - 4;
 
     for (uint8_t i = 0; i < 7; i++) {
       
@@ -208,9 +249,45 @@ void scanKeysTask(void * pvParameters) {
       
       if(i < 3) {
         for (uint8_t j = 0; j < 4; j++) { 
+
+          local_key = 3-j +(i*4);
+
           if (~keys & (1 << j)) {
-              local_key = 3-j +(i*4);
-              __atomic_store_n(&step, local_key, __ATOMIC_RELAXED);
+            if(receiver){
+              if(relative_octive > 0){
+                local_stepsize = stepSizes[local_key] << relative_octive;
+              }
+              else{
+                local_stepsize = stepSizes[local_key] >> abs(relative_octive);
+              }
+              __atomic_store_n(&currentStepSize[local_key],local_stepsize, __ATOMIC_RELAXED);
+            }
+            if(!receiver && (!pressed[local_key]) ){
+
+              TX_Message[0] = 'P';
+              TX_Message[1] = Octave.value;
+              TX_Message[2] = local_key;
+              TX_Message[3] = position;
+
+              xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
+            }
+            pressed[local_key] = 1;
+          }
+          else{
+            
+            if(receiver){
+              __atomic_store_n(&currentStepSize[local_key],0, __ATOMIC_RELAXED);
+            }
+            if(!receiver && pressed[local_key]){
+
+              TX_Message[0] = 'R';
+              TX_Message[1] = Octave.value;
+              TX_Message[2] = local_key;
+              TX_Message[3] = position;
+
+              xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+            }
+            pressed[local_key] = 0;
           }
         }
       }
@@ -232,38 +309,23 @@ void scanKeysTask(void * pvParameters) {
       }
     }
 
-    Volume.read_knob();
-    Octave.read_knob();
-    Waveform.read_knob();
-
     if(receiver){
-      relative_octive = Octave.value - 4;
-      if(relative_octive > 0){
-        local_stepsize = stepSizes[step] << relative_octive;
-      }
-      else{
-        local_stepsize = stepSizes[step] >> abs(relative_octive);
-      }
+      Volume.read_knob();
+      Octave.read_knob();
+      Waveform.read_knob();
+      if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){
 
-      TX_Message[0] = 'O';
-      TX_Message[1] = Octave.value;
+        TX_Message[0] = 'K';
+        TX_Message[1] = Volume.value;
+        TX_Message[2] = Octave.value;
+        TX_Message[3] = Waveform.value;
 
-      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-    }
-
-    if(!receiver){
-      
-      if (step == 12) {
-        TX_Message[0] = 'R';
-        TX_Message[1] = Octave.value;
-      }
-      else{
-        TX_Message[0] = 'P';
-        TX_Message[1] = Octave.value;
-        TX_Message[2] = step;
+        xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
       }
 
-      xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
+      vol = Volume.value;
+      oct = Octave.value;
+      wavetype = Waveform.value;
     }
   }
 }
@@ -326,9 +388,6 @@ void broadcastPosition() {
   TX_Message[1] = 0;
   TX_Message[2] = position;
 
-  // Serial.println("test");
-  // Serial.println(position);
-
   xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
 }
 
@@ -346,48 +405,57 @@ void broadcastEndHandshake() {
 
 void decodeTask(void * pvParameters) {
 
-  int external_stepsize;
+  int local_stepsize;
   int relative_octive;
+  int local_key;
 
   int handshake_count = 0;
 
   while(1) {
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
 
-    if(receiver && !externalKeyPressed){
-       __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
-    }
-
     switch(RX_Message[0]) {
       case 'R':
-        externalKeyPressed = false;
-        external_stepsize = stepSizes[12];
+        if(receiver){
+          local_stepsize = stepSizes[12];
+          local_key = 12*RX_Message[3] + RX_Message[2];
+          __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
+        }
         break;
       
       case 'P':
-        externalKeyPressed = true;
-        relative_octive = RX_Message[1] - 4;
-        if(relative_octive > 0){
-          external_stepsize = stepSizes[RX_Message[2]] << relative_octive;
+
+        if(receiver){
+          relative_octive = RX_Message[1] - 4;
+          local_key = 12*RX_Message[3] + RX_Message[2];
+          Serial.println(local_key);
+          if(relative_octive > 0){
+            local_stepsize = stepSizes[RX_Message[2]] << relative_octive;
+          }
+          else{
+            local_stepsize = stepSizes[RX_Message[2]] >> abs(relative_octive);
+          }
+          __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
         }
-        else{
-          external_stepsize = stepSizes[RX_Message[2]] >> abs(relative_octive);
-        }
-        __atomic_store_n(&currentStepSize, external_stepsize, __ATOMIC_RELAXED);
+         break;
+
+      case 'K':
+        Volume.set_value(RX_Message[1]);
+        Octave.set_value(RX_Message[2] + position);
+        Waveform.set_value(RX_Message[3]);
         break;
 
-      case 'O':
-        Octave.set_value(RX_Message[1] + position);
-
       case 'H':
+        Serial.println("Received H");
         if(west){
           handshake_count++;
         }
         if(!west) {
           if(!position_set) {
-            position = handshake_count;
+            position = RX_Message[2] + 1;
             position_set = true;
             if(!east) {
+              Serial.println("End");
               broadcastEndHandshake();
             }
             else{
@@ -399,6 +467,7 @@ void decodeTask(void * pvParameters) {
         }
         break;
       case 'E':
+        Serial.println("Received E");
         if(position == 0) {
           receiver = true;
         }
@@ -406,6 +475,7 @@ void decodeTask(void * pvParameters) {
           receiver = false;
         }
         Octave.set_value(position + 4);
+        break;
     }
   }
 }
