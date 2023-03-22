@@ -46,11 +46,15 @@ volatile int step;
 
 //
 bool receiver = true;
-uint8_t position;
+uint8_t position = 8;
 bool position_set;
 
-bool east;
-bool west;
+
+int local_stepsize;
+bool externalKeyPressed;
+
+volatile bool east;
+volatile bool west;
 
 //CAN Bus
 uint8_t RX_Message[8] = {0};
@@ -183,7 +187,7 @@ void scanKeysTask(void * pvParameters) {
   int wavetype;
 
   int local_key;
-  int local_stepsize;
+  int relative_octive;
 
   uint8_t TX_Message[8] = {0};
 
@@ -232,18 +236,35 @@ void scanKeysTask(void * pvParameters) {
     Octave.read_knob();
     Waveform.read_knob();
 
-    if (step == 12) {
-      TX_Message[0] = 'R';
+    if(receiver){
+      relative_octive = Octave.value - 4;
+      if(relative_octive > 0){
+        local_stepsize = stepSizes[step] << relative_octive;
+      }
+      else{
+        local_stepsize = stepSizes[step] >> abs(relative_octive);
+      }
+
+      TX_Message[0] = 'O';
       TX_Message[1] = Octave.value;
-    }
-    else{
-      TX_Message[0] = 'P';
-      TX_Message[1] = Octave.value;
-      TX_Message[2] = step;
+
+      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
     }
 
-    // CAN_TX(0x123, TX_Message);
-    xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
+    if(!receiver){
+      
+      if (step == 12) {
+        TX_Message[0] = 'R';
+        TX_Message[1] = Octave.value;
+      }
+      else{
+        TX_Message[0] = 'P';
+        TX_Message[1] = Octave.value;
+        TX_Message[2] = step;
+      }
+
+      xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
+    }
   }
 }
 
@@ -305,6 +326,9 @@ void broadcastPosition() {
   TX_Message[1] = 0;
   TX_Message[2] = position;
 
+  // Serial.println("test");
+  // Serial.println(position);
+
   xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
 }
 
@@ -321,49 +345,56 @@ void broadcastEndHandshake() {
 
 
 void decodeTask(void * pvParameters) {
-  bool external_pressed;
 
-  int local_stepsize;
+  int external_stepsize;
   int relative_octive;
+
+  int handshake_count = 0;
 
   while(1) {
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
 
+    if(receiver && !externalKeyPressed){
+       __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
+    }
+
     switch(RX_Message[0]) {
       case 'R':
-        external_pressed = false;
-        Octave.set_value(RX_Message[1] + position);
-        local_stepsize = stepSizes[12];
-        __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
-        Octave.set_value(RX_Message[1] + position);
+        externalKeyPressed = false;
+        external_stepsize = stepSizes[12];
         break;
       
       case 'P':
-        external_pressed = true;
-        Octave.set_value(RX_Message[1] + position);
-        relative_octive = Octave.value - 4;
+        externalKeyPressed = true;
+        relative_octive = RX_Message[1] - 4;
         if(relative_octive > 0){
-          local_stepsize = stepSizes[RX_Message[2]] << relative_octive;
+          external_stepsize = stepSizes[RX_Message[2]] << relative_octive;
         }
         else{
-          local_stepsize = stepSizes[RX_Message[2]] >> abs(relative_octive);
+          external_stepsize = stepSizes[RX_Message[2]] >> abs(relative_octive);
         }
-        __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
+        __atomic_store_n(&currentStepSize, external_stepsize, __ATOMIC_RELAXED);
         break;
 
+      case 'O':
+        Octave.set_value(RX_Message[1] + position);
+
       case 'H':
-      Serial.println(RX_Message[0]);
+        if(west){
+          handshake_count++;
+        }
         if(!west) {
           if(!position_set) {
-            position = RX_Message[2] + 1;
+            position = handshake_count;
             position_set = true;
-          }
-          if(!east) {
-            broadcastEndHandshake();
-          }
-          else{
-            setOutMuxBit(HKOW_BIT, LOW);
-            broadcastPosition();
+            if(!east) {
+              broadcastEndHandshake();
+            }
+            else{
+              setOutMuxBit(HKOE_BIT, LOW);
+              delayMicroseconds(1000000);
+              broadcastPosition();
+            }
           }
         }
         break;
@@ -372,7 +403,7 @@ void decodeTask(void * pvParameters) {
           receiver = true;
         }
         else {
-          position = false;
+          receiver = false;
         }
         Octave.set_value(position + 4);
     }
@@ -391,11 +422,9 @@ void CAN_TX_Task (void * pvParameters) {
 void checkBoards() {
   if(~keyArray[5] & 1) {
     west = true;
-    Serial.println("Connected West");
   }
   else if(~keyArray[6] & 1) {
     east = true;
-    Serial.println("Connected East");
 
   }
 
@@ -403,11 +432,9 @@ void checkBoards() {
     //leftmost board
     position = 0;
     position_set = true;
-    Serial.println("Leftmost board");
 
     if(!east) {
       //Only one module - end handshake
-      Serial.println("Only One Module");
       CAN_Init(true);
     }
   }
@@ -419,7 +446,8 @@ void initialHandshake() {
       Octave.set_value(position+4);
     }
     else{
-      setOutMuxBit(HKOW_BIT, LOW);
+      setOutMuxBit(HKOE_BIT, LOW);
+      delayMicroseconds(1000000);
       broadcastPosition();
     }
   }
@@ -516,13 +544,15 @@ void setup() {
   //initialise handshake
   setOutMuxBit(HKOW_BIT, HIGH);  //Enable west handshake
   setOutMuxBit(HKOE_BIT, HIGH);  //Enable east handshake
+
+  delayMicroseconds(2000000); //wait 1 sec for other boards to start
+
   for(int i = 5; i <= 6; i++) {
     setRow(i);
     delayMicroseconds(2);
     keyArray[i] = readCols();
   }
 
-  delayMicroseconds(1000000); //wait 1 sec for other boards to start
   checkBoards();
   CAN_Start();
   delayMicroseconds(1000000);
