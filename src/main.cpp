@@ -65,9 +65,9 @@ SemaphoreHandle_t keyArrayMutex;
 SemaphoreHandle_t CAN_TX_Semaphore;
 
 //Knobs
-Knob Volume(8, 8, 0, 3);
-Knob Octave(4, 7, 1, 2);
-Knob Waveform(0, 3, 0, 1);
+Knob Volume(8, 8, 0, 0);
+Knob Octave(4, 7, 1, 1);
+Knob Waveform(0, 3, 0, 2);
 
 //waveforms
 const unsigned char sinetable[128] = {
