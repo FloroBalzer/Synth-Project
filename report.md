@@ -41,7 +41,7 @@ By connecting multiple keyboards together, the modules will autmatically detect 
 ## Timing and CPU Analysis
 ___
 
-This table outlines the thread initation and execution times and uses these values to calculate the CPU Utilisation. As seen from the table the most demanding task is SampleISR as it has to operate at a much higher frequency. DisplayUpdateTask also has a conisderable contribution to the demand of the CPU as it has to generate every pixel. All the other tasks have a negligible demand on the CPU. 
+This table outlines the thread minimum initation and maximum execution times and uses these values to calculate the CPU Utilisation. As seen from the table the most demanding task is SampleISR as it has to operate at a much higher frequency. DisplayUpdateTask also has a conisderable contribution to the demand of the CPU as it has to generate every pixel. All the other tasks have a negligible demand on the CPU. 
 
 
 | Name              | Type of Task | Rate of execution                             | Minimum Initiation Interval (ms) | Maximum Execution Time (ms) | CPU Utilisation (%) |
