@@ -23,6 +23,9 @@
 
 //////////////////////// if test define it will work
 #define TEST_SCANKEYS
+// #define TEST_DISPLAY
+// #define TEST_DECODE
+// #define TEST_CAN
 
 //Constants
 
@@ -200,6 +203,9 @@ void CAN_TX_Task (void * pvParameters) {
 	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
 		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
 		CAN_TX(0x123, msgOut);
+    #ifdef TEST_CAN
+      break;
+    #endif
 	}
 }
 
@@ -363,7 +369,9 @@ void displayUpdateTask(void * pvParameters) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   while(1) {
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    #ifndef TEST_DISPLAY
+      vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    #endif
 
     //Update display
     u8g2.clearBuffer();         // clear the internal memory
@@ -416,6 +424,10 @@ void displayUpdateTask(void * pvParameters) {
 
     //Toggle LED
     digitalToggle(LED_BUILTIN);
+
+    #ifdef TEST_DISPLAY
+     break;
+    #endif
   }
 }
 
@@ -525,6 +537,10 @@ void decodeTask(void * pvParameters) {
         Octave.set_value(position + 4);
         break;
     }
+
+    #ifdef TEST_DECODE
+      break;
+    #endif
   }
 }
 
@@ -694,6 +710,43 @@ void setup() {
     while (1)
       ;
   #endif
+
+  // #ifdef TEST_DISPLAY
+  //   uint32_t startTime = micros();
+  //   for (int iter = 0; iter < 32; iter++)
+  //   {
+  //     scanKeysTask(nullptr);
+  //   }
+  //   Serial.println(micros() - startTime);
+  //   while (1)
+  //     ;
+  // #endif
+
+  // #ifdef TEST_DECODE
+  //   uint32_t startTime = micros();
+  //   for (int iter = 0; iter < 32; iter++)
+  //   {
+  //     scanKeysTask(nullptr);
+  //   }
+  //   Serial.println(micros() - startTime);
+  //   while (1)
+  //     ;
+  // #endif
+
+
+  // #ifdef TEST_CAN
+  //   uint32_t startTime = micros();
+  //   for (int iter = 0; iter < 32; iter++)
+  //   {
+  //     scanKeysTask(nullptr);
+  //   }
+  //   Serial.println(micros() - startTime);
+  //   while (1)
+  //     ;
+  // #endif
+
+
+
 
   checkBoards();
   CAN_Start();
