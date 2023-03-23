@@ -58,6 +58,8 @@ This table outlines the thread minimum initation and maximum execution times and
 ## Shared Data Structures
 ___
 
+These are the shared data structures throughout the program. The table shows how each of them are protected.
+
 | Type     | Name                      | Protected by       |
 |----------|---------------------------|--------------------|
 | uint8_t  | keyArray[7]               | keyArrayMutex      |
