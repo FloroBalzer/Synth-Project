@@ -52,12 +52,6 @@ ___
 | decodeTask        | Thread       | When a message is added to the incoming queue | 25.2 for 36 executions           | 0.016                       | 2.28                |
 
 
-## A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met under worst-case conditions
-___
-
-## A quantification of total CPU utilisation
-___
-
 
 ## Shared Data Structures
 ___
@@ -78,6 +72,5 @@ ___
 
 In addition to this each knob defined as type Knob, where the Knob class is made safe by using atomic stores only.
 
-## An analysis of inter-task blocking dependencies that shows any possibility of deadlock
-___
+
 
