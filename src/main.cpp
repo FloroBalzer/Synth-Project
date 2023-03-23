@@ -141,10 +141,10 @@ void sampleISR() {
       else if (wavetype == 2) {
         // Triangle - <128 linear increase, >128 linear decrease
         if ((phaseAcc[i] >> 24) >= 128) {
-          Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 127;
+          Vout += 2*(((255 - (phaseAcc[i] >> 24)) * 2) - 127);
         }
         else {
-          Vout += (phaseAcc[i] >> 23) - 128;
+          Vout += 2*((phaseAcc[i] >> 23) - 128);
         }
       }
       else if (wavetype == 3) {
@@ -158,7 +158,7 @@ void sampleISR() {
           idx = phaseAcc[i] >> 24;
         }
 
-        Vout += sinetable[idx] - 128;
+        Vout += 2*(sinetable[idx] - 128);
       }
     }
   }
