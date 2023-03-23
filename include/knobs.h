@@ -37,6 +37,10 @@ class Knob{
             return std::max(std::min(val, max_value), min_value);
         }
 
+        void set_value(int val) {
+            __atomic_store_n(&value, val, __ATOMIC_RELAXED);
+        }
+
         void read_knob() {
 
 
@@ -81,9 +85,7 @@ class Knob{
             a_prev = a_current;
             b_prev = b_current;
 
-            xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-            __atomic_store_n(&value, clamp(value+ 1*direction), __ATOMIC_RELAXED);
-            xSemaphoreGive(keyArrayMutex);
+            set_value(clamp(value+ 1*direction));
         }
 };
 

@@ -4,501 +4,548 @@
 #include <string>
 #include <STM32FreeRTOS.h>
 #include <ES_CAN.h>
+#include <algorithm>
 
-#include <knobs.h>
+#include "knobs.h"
 
-// Constants
-const uint32_t interval = 100; // Display update interval
+//Constants
 
-// Pin definitions
-// Row select and enable
+//Pin definitions
+//Row select and enable
 const int RA0_PIN = D3;
 const int RA1_PIN = D6;
 const int RA2_PIN = D12;
 const int REN_PIN = A5;
 
-// Matrix input and output
+//Matrix input and output
 const int C0_PIN = A2;
 const int C1_PIN = D9;
 const int C2_PIN = A6;
 const int C3_PIN = D1;
 const int OUT_PIN = D11;
 
-// Audio analogue out
+//Audio analogue out
 const int OUTL_PIN = A4;
 const int OUTR_PIN = A3;
 
-// Joystick analogue in
+//Joystick analogue in
 const int JOYY_PIN = A0;
 const int JOYX_PIN = A1;
 
-// Output multiplexer bits
+//Output multiplexer bits
 const int DEN_BIT = 3;
 const int DRST_BIT = 4;
 const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 
-// other
-volatile uint32_t currentStepSize[12] = {0};
-volatile int step;
-volatile bool keypressed;
+//Step Size and notes
+const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
+const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
+const uint8_t key_size = 36;
 
-// Step Size Array
-float frequencies[] = {261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392, 415.3, 440, 466.16, 493.88};
-const uint32_t stepSizes[] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0};
-const std::string notes[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Key"};
-
-// key Array
-SemaphoreHandle_t keyArrayMutex;
 volatile uint8_t keyArray[7];
-volatile uint8_t key_size = 12;
-volatile uint8_t numKeyPress = 0;
+volatile uint32_t currentStepSize[key_size] = {0};
+volatile uint8_t pressed[key_size] = {0};
 
-// Knobs
-Knob Volume(8, 8, 0, 3);
-Knob Octave(0, 3, 0, 2);
-Knob Waveform(0, 3, 0, 1);
+//Multiple Modules
+uint8_t position = 8;
+volatile bool receiver = true;
+volatile bool position_set;
+volatile bool east;
+volatile bool west;
 
-// joystick
-volatile int32_t vstep = 0;
+//CAN Bus
+uint8_t RX_Message[8] = {0};
+
+//Queues
+QueueHandle_t msgInQ;
+QueueHandle_t msgOutQ;
+
+//mutex and semaphores
+SemaphoreHandle_t keyArrayMutex;
+SemaphoreHandle_t CAN_TX_Semaphore;
+SemaphoreHandle_t pressedMutex;
+
+//Knobs
+Knob Volume(8, 8, 0, 0);
+Knob Octave(4, 7, 1, 1);
+Knob Waveform(0, 3, 0, 2);
+
+//joystick
 volatile int32_t bstep = 0;
-volatile int joyY = 490;
 volatile int joyX = 563;
 volatile int joyXbias;
-volatile int joyYbias;
 
-// waveforms
-//  This is the only wave we set up "by hand"
-//  Note: this is the first half of the wave,
-//        the second half is just this mirrored.
+
+//waveforms
 const unsigned char sinetable[128] = {
-    0,
-    0,
-    0,
-    0,
-    1,
-    1,
-    1,
-    2,
-    2,
-    3,
-    4,
-    5,
-    5,
-    6,
-    7,
-    9,
-    10,
-    11,
-    12,
-    14,
-    15,
-    17,
-    18,
-    20,
-    21,
-    23,
-    25,
-    27,
-    29,
-    31,
-    33,
-    35,
-    37,
-    40,
-    42,
-    44,
-    47,
-    49,
-    52,
-    54,
-    57,
-    59,
-    62,
-    65,
-    67,
-    70,
-    73,
-    76,
-    79,
-    82,
-    85,
-    88,
-    90,
-    93,
-    97,
-    100,
-    103,
-    106,
-    109,
-    112,
-    115,
-    118,
-    121,
-    124,
-    128,
-    131,
-    134,
-    137,
-    140,
-    143,
-    146,
-    149,
-    152,
-    155,
-    158,
-    162,
-    165,
-    167,
-    170,
-    173,
-    176,
-    179,
-    182,
-    185,
-    188,
-    190,
-    193,
-    196,
-    198,
-    201,
-    203,
-    206,
-    208,
-    211,
-    213,
-    215,
-    218,
-    220,
-    222,
-    224,
-    226,
-    228,
-    230,
-    232,
-    234,
-    235,
-    237,
-    238,
-    240,
-    241,
-    243,
-    244,
-    245,
-    246,
-    248,
-    249,
-    250,
-    250,
-    251,
-    252,
-    253,
-    253,
-    254,
-    254,
-    254,
-    255,
-    255,
-    255,
+    0,   0,   0,   0,   1,   1,   1,   2,   2,   3,   4,   5,   5,   6,   7,   9,
+   10,  11,  12,  14,  15,  17,  18,  20,  21,  23,  25,  27,  29,  31,  33,  35,
+   37,  40,  42,  44,  47,  49,  52,  54,  57,  59,  62,  65,  67,  70,  73,  76,
+   79,  82,  85,  88,  90,  93,  97, 100, 103, 106, 109, 112, 115, 118, 121, 124,
+  128, 131, 134, 137, 140, 143, 146, 149, 152, 155, 158, 162, 165, 167, 170, 173,
+  176, 179, 182, 185, 188, 190, 193, 196, 198, 201, 203, 206, 208, 211, 213, 215,
+  218, 220, 222, 224, 226, 228, 230, 232, 234, 235, 237, 238, 240, 241, 243, 244,
+  245, 246, 248, 249, 250, 250, 251, 252, 253, 253, 254, 254, 254, 255, 255, 255,
 };
 
-// Display driver object
+//Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
-// Function to set outputs using key matrix
-void setOutMuxBit(const uint8_t bitIdx, const bool value)
-{
-  digitalWrite(REN_PIN, LOW);
-  digitalWrite(RA0_PIN, bitIdx & 0x01);
-  digitalWrite(RA1_PIN, bitIdx & 0x02);
-  digitalWrite(RA2_PIN, bitIdx & 0x04);
-  digitalWrite(OUT_PIN, value);
-  digitalWrite(REN_PIN, HIGH);
-  delayMicroseconds(2);
-  digitalWrite(REN_PIN, LOW);
+//Function to set outputs using key matrix
+void setOutMuxBit(const uint8_t bitIdx, const bool value) {
+      digitalWrite(REN_PIN,LOW);
+      digitalWrite(RA0_PIN, bitIdx & 0x01);
+      digitalWrite(RA1_PIN, bitIdx & 0x02);
+      digitalWrite(RA2_PIN, bitIdx & 0x04);
+      digitalWrite(OUT_PIN,value);
+      digitalWrite(REN_PIN,HIGH);
+      delayMicroseconds(2);
+      digitalWrite(REN_PIN,LOW);
 }
 
-void sampleISR()
-{
+void sampleISR() {
 
-  static uint32_t phaseAcc[12] = {0};
+  static uint32_t phaseAcc[key_size] = {0};
 
-  // start bend
-  // end bend
-  // int wavetype = Waveform.value;
+  int wavetype = Waveform.value;
   int32_t Vout = 0;
 
-  for (int i = 0; i < key_size; i++)
-  {
-    if (currentStepSize[i] != 0)
-    {
+  for (int i = 0; i < key_size; i++) {
+    if (currentStepSize[i] != 0) {
 
-      //     int bend = abs(joyX - joyXbias);
-      //     if (bend < 28)
-      //     {
-      //       bend = 28;
-      //     }
-      //     if (joyX > joyXbias)
-      //     {
-      //       bstep = bend * 17961;
-      //     }
-      //     if (joyX <= joyXbias)
-      //     {
-      //       bstep = bend * -17961;
-      //     }
-      //     if (bend < 50)
-      //     {
-      //       bstep = 0;
-      //     }
-      //   }
-      //   else
-      //   {
-      //     bstep = 0;
-      //   }
-      // if (wavetype == 0)
-      // {
-      // Sawtooth
-      phaseAcc[i] += (int)(currentStepSize[i]);
-      Vout += (int)(phaseAcc[i] >> 24) - 128;
+      int bend = abs(joyX - joyXbias);
+      if (bend < 28)
+      {
+        bend = 28;
+      }
+      if (joyX > joyXbias)
+      {
+        bstep = bend * 17961;
+      }
+      if (joyX <= joyXbias)
+      {
+        bstep = bend * -17961;
+      }
+      if (bend < 50)
+      {
+        bstep = 0;
+      }
+      
+      phaseAcc[i] += (int)(currentStepSize[i]) + bstep;
+
+      if (wavetype == 0) {
+        // Sawtooth - linear increase
+        Vout += (int)(phaseAcc[i] >> 24) - 128;
+      }
+      else if (wavetype == 1) {
+        // Square - set high or low
+        Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
+      }
+      else if (wavetype == 2) {
+        // Triangle - <128 linear increase, >128 linear decrease
+        if ((phaseAcc[i] >> 24) >= 128) {
+          Vout += 2*(((255 - (phaseAcc[i] >> 24)) * 2) - 127);
+        }
+        else {
+          Vout += 2*((phaseAcc[i] >> 23) - 128);
+        }
+      }
+      else if (wavetype == 3) {
+        // sinusoid - lookup table
+        int idx;
+
+        if ((phaseAcc[i] >> 24) >= 128) {
+          idx = 255 - (phaseAcc[i] >> 24);
+        }
+        else {
+          idx = phaseAcc[i] >> 24;
+        }
+
+        Vout += 2*(sinetable[idx] - 128);
+      }
     }
   }
 
-  // }
-  // else if (wavetype == 1)
-  // {
-  //   // Square
-  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-  //   Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
-  // }
-  // else if (wavetype == 2)
-  // {
-  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-  //   // Triangle
-  //   if ((phaseAcc[i] >> 24) >= 128)
-  //   {
-
-  //     Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 128;
-  //   }
-  //   else
-  //   {
-  //     // equivalent to phaseAcc[i] >> 24 * 2
-  //     Vout += (phaseAcc[i] >> 23) - 128;
-  //   }
-  // }
-  // else if (wavetype == 3)
-  // {
-  //   // sinusoid
-  //   int idx;
-  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-
-  //   if ((phaseAcc[i] >> 24) >= 128)
-  //   {
-  //     idx = 255 - (phaseAcc[i] >> 24);
-  //   }
-  //   else
-  //   {
-  //     idx = phaseAcc[i] >> 24;
-  //   }
-
-  //   Vout += sinetable[idx] + 128;
-  // }
-  // }
-
   Vout = (int)Vout >> (8 - Volume.value);
-  if (Vout > 127)
-  {
-    Vout = 127;
-  }
-  else if (Vout < -128)
-  {
-    Vout = 128;
-  }
+
+  Vout = std::max(std::min((int)Vout, 127), -128);
 
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
-void setRow(uint8_t rowIdx)
-{
-  digitalWrite(REN_PIN, LOW);
-  digitalWrite(RA0_PIN, rowIdx & 0x01);
-  digitalWrite(RA1_PIN, rowIdx & 0x02);
-  digitalWrite(RA2_PIN, rowIdx & 0x04);
-  digitalWrite(REN_PIN, HIGH);
+void CAN_RX_ISR (void) {
+	uint8_t RX_Message_ISR[8];
+	uint32_t ID;
+	CAN_RX(ID, RX_Message_ISR);
+	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
 }
 
-uint8_t readCols()
-{
-  int C0 = digitalRead(C0_PIN);
-  int C1 = digitalRead(C1_PIN);
-  int C2 = digitalRead(C2_PIN);
-  int C3 = digitalRead(C3_PIN);
-  uint8_t col_input = (C0 << 3) | (C1 << 2) | (C2 << 1) | (C3);
-
-  return col_input;
+void CAN_TX_ISR (void) {
+	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
 }
 
-void scanKeysTask(void *pvParameters)
-{
+void CAN_TX_Task (void * pvParameters) {
+	uint8_t msgOut[8];
+	while (1) {
+	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+		CAN_TX(0x123, msgOut);
+	}
+}
 
-  const TickType_t xFrequency = 200 / portTICK_PERIOD_MS;
+void setRow(uint8_t rowIdx) {
+  digitalWrite(REN_PIN,LOW);
+  unsigned char RA2 = rowIdx & 0b00000100; //RA2
+  unsigned char RA1 = rowIdx & 0b00000010;//RA1
+  unsigned char RA0 = rowIdx & 0b00000001;//RA2
+  digitalWrite(RA2_PIN, RA2);
+  digitalWrite(RA1_PIN, RA1);
+  digitalWrite(RA0_PIN, RA0);
+  digitalWrite(REN_PIN,HIGH);
+
+}
+
+uint8_t readCols() {
+  int a= digitalRead(C0_PIN);
+  int b = digitalRead(C1_PIN);
+  int c = digitalRead(C2_PIN);
+  int d = digitalRead(C3_PIN);
+  uint8_t colout = (a<<3) | (b<<2) | (c<<1) | (d);
+  return colout;
+}
+
+void scanKeysTask(void * pvParameters) {
+
+  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   uint8_t keys;
-  int wavetype;
 
-  // CAN BUS
+  int vol = 0;
+  int oct = 0;
+  int wavetype = 0;
+
+  int local_key;
+  int local_stepsize;
+
+  int relative_octive;
+
   uint8_t TX_Message[8] = {0};
 
-  while (1)
-  {
-    vTaskDelayUntil(&xLastWakeTime, xFrequency);
+  while(1) {
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
-    for (uint8_t i = 0; i < 5; i++)
-    {
+    relative_octive = Octave.value - 4;
+
+    for (uint8_t i = 0; i < 7; i++) {
+      
       setRow(i);
       delayMicroseconds(3);
       keys = readCols();
-
+      
       xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
       keyArray[i] = keys;
       xSemaphoreGive(keyArrayMutex);
+      
+      if(i < 3) {
+        for (uint8_t j = 0; j < 4; j++) { 
 
-      if (i < 3)
-      {
-        for (uint8_t j = 0; j < 4; j++)
-        {
-          if (~keys & (1 << j))
-          {
-            __atomic_store_n(&currentStepSize[3 - j + (i * 4)], stepSizes[3 - j + (i * 4)], __ATOMIC_RELAXED);
+          local_key = 3-j +(i*4);
+
+          if (~keys & (1 << j)) { //key pressed
+            
+            if(receiver){
+              if(relative_octive > 0){
+                local_stepsize = stepSizes[local_key] << relative_octive;
+              }
+              else{
+                local_stepsize = stepSizes[local_key] >> abs(relative_octive);
+              }
+              __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
+            }
+
+            xSemaphoreTake(pressedMutex, portMAX_DELAY);
+            if(!receiver && (!pressed[local_key]) ){ //newly pressed
+              
+              TX_Message[0] = 'P';
+              TX_Message[1] = Octave.value;
+              TX_Message[2] = local_key;
+              TX_Message[3] = position;
+
+              xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+            }
+            pressed[local_key] = 1;
+            xSemaphoreGive(pressedMutex);
           }
-          else
-          {
-            __atomic_store_n(&currentStepSize[3 - j + (i * 4)], 0, __ATOMIC_RELAXED);
+          else{ //key not pressed
+            
+            if(receiver){
+              __atomic_store_n(&currentStepSize[local_key], 0, __ATOMIC_RELAXED);
+            }
+
+            xSemaphoreTake(pressedMutex, portMAX_DELAY);
+            if(!receiver && pressed[local_key]){ //newly released
+              
+              TX_Message[0] = 'R';
+              TX_Message[1] = Octave.value;
+              TX_Message[2] = local_key;
+              TX_Message[3] = position;
+
+              xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+            }
+            pressed[local_key] = 0;
+            xSemaphoreGive(pressedMutex);
           }
         }
-        int key_loop = 0xf;
-        for (int i = 0; i < 8; i++)
-        {
-          key_loop = keyArray[i] & key_loop;
+      }
+      else if(i==5) {
+        if(~keys & 1) { //detect west
+          __atomic_store_n(&west, true, __ATOMIC_RELAXED);
         }
-        if (key_loop == 0xf)
-          keypressed = false;
-        else
-          keypressed = true;
+        else{
+          __atomic_store_n(&west, false, __ATOMIC_RELAXED);
+        }
+      }
+      else if(i==6) { 
+        if(~keys & 1) { //detect east
+          __atomic_store_n(&east, true, __ATOMIC_RELAXED);
+        }
+        else{
+          __atomic_store_n(&east, false, __ATOMIC_RELAXED);
+        }
       }
     }
-    // Serial.println(keyArray[0] & keyArray[1] & keyArray[2]);
-    //   Serial.println(keyArray[i], BIN);
-    // Serial.println(numKeyPress);
-    // Serial.println("br");
 
-    Volume.read_knob();
-    Octave.read_knob();
-    Waveform.read_knob();
-    joyY = analogRead(A0);
-    joyX = analogRead(A1);
+    if(receiver){
+      Volume.read_knob();
+      Octave.read_knob();
+      Waveform.read_knob();
+      joyX = analogRead(A1);
 
-    TX_Message[0] = 'p';
-    TX_Message[1] = Octave.value;
-    TX_Message[2] = step;
+      if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){ //change to knobs
 
-    CAN_TX(0x123, TX_Message);
+        TX_Message[0] = 'K';
+        TX_Message[1] = Volume.value;
+        TX_Message[2] = Octave.value;
+        TX_Message[3] = Waveform.value;
+
+        xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+
+        vol = Volume.value;
+        oct = Octave.value;
+        wavetype = Waveform.value;
+      }
+    }
   }
 }
 
-void displayUpdateTask(void *pvParameters)
-{
-  const TickType_t xFrequency = 100 / portTICK_PERIOD_MS;
+void displayUpdateTask(void * pvParameters) {
+  const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
-  // CAN Bus
-  uint32_t ID;
-  uint8_t RX_Message[8] = {0};
+  while(1) {
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
-  while (1)
-  {
-    vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
-    while (CAN_CheckRXLevel())
-    {
-      CAN_RX(ID, RX_Message);
-    }
-
-    // Update display
-    u8g2.clearBuffer();                 // clear the internal memory
+    //Update display
+    u8g2.clearBuffer();         // clear the internal memory
     u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-
+    
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    u8g2.drawStr(2, 10, notes[step].c_str());
+    xSemaphoreTake(pressedMutex, portMAX_DELAY);
+    int count = 0;
+  
+    for(int i=0; i<key_size; i++) { //display keys played
+      if(pressed[i] == 1) {
+        Serial.println(count);
+        u8g2.drawStr(2 + 15*count, 10, notes[i%12].c_str());
+        count++;
+      }
+    }
+    xSemaphoreGive(pressedMutex);
 
-    u8g2.setCursor(2, 20);
+    u8g2.setCursor(2,20); 
     u8g2.print(keyArray[2], HEX);
     u8g2.print(" ");
     u8g2.print(keyArray[1], HEX);
     u8g2.print(" ");
     u8g2.print(keyArray[0], HEX);
 
+    receiver ? u8g2.drawStr(66,20,"Receiver") : u8g2.drawStr(66,20,"Sender");
+    u8g2.setCursor(120,20);
+    u8g2.print(position, HEX);
+
     u8g2.drawStr(2, 30, "V: ");
-    u8g2.setCursor(15, 30);
+    u8g2.setCursor(15,30);
     u8g2.print(Volume.value);
+
     u8g2.drawStr(25, 30, "O: ");
-    u8g2.setCursor(40, 30);
+    u8g2.setCursor(40,30);
     u8g2.print(Octave.value);
+
     u8g2.drawStr(50, 30, "W: ");
-    u8g2.setCursor(65, 30);
+    u8g2.setCursor(65,30);
     u8g2.print(Waveform.value);
 
-    u8g2.setCursor(75, 30);
-    u8g2.print((char)RX_Message[0]);
+    u8g2.setCursor(75,30);
+    u8g2.print((char) RX_Message[0]);
     u8g2.print(RX_Message[1]);
     u8g2.print(RX_Message[2]);
+    u8g2.print(RX_Message[3]);
 
-    u8g2.sendBuffer(); // transfer internal memory to the display
+    u8g2.sendBuffer();  // transfer internal memory to the display
     xSemaphoreGive(keyArrayMutex);
 
-    // Toggle LED
+    //Toggle LED
     digitalToggle(LED_BUILTIN);
   }
 }
-// void vibratoTask(void *pvParameters)
-// {
-//   const TickType_t xFrequency = 10 / portTICK_PERIOD_MS;
-//   TickType_t xLastWakeTime = xTaskGetTickCount();
-//   int v_count = 0;
-//   bool hit_peak = false;
-//   while (1)
-//   {
 
-//     vTaskDelayUntil(&xLastWakeTime, xFrequency);
-//     int t = 1;
-//     {
-//       for (int j; j < key_size; j++)
-//       {
-//         if (currentStepSize[j] != 0)
-//         {
-//           int center = abs(joyY - joyYbias);
-//           // y of joystick min 900 max 138 mid 490
-//           if (!hit_peak)
-//             v_count++;
-//           else
-//             v_count--;
-//           if (v_count == 128)
-//             hit_peak = true;
-//           if (v_count == 0)
-//             hit_peak = false;
-//           vstep = (sinetable[v_count] - 128) * 10e4;
-//           delay()
-//         }
-//       }
-//     }
-//   }
-// }
+void broadcastPosition() {
+  uint8_t TX_Message[8] = {0};
 
-void setup()
-{
-  // put your setup code here, to run once:
+  TX_Message[0] = 'H';
+  TX_Message[1] = 0;
+  TX_Message[2] = position;
 
-  // Set pin directions
+  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+}
+
+void broadcastEndHandshake() {
+  uint8_t TX_Message[8] = {0};
+
+  if(position != 0) {
+    __atomic_store_n(&receiver, false, __ATOMIC_RELAXED);
+  }
+  Octave.set_value(position + 4);
+  TX_Message[0] = 'E';
+  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+}
+
+void decodeTask(void * pvParameters) {
+
+  int local_stepsize;
+  int relative_octive;
+  int local_key;
+
+  uint8_t local_RX_Message[8] = {0};
+
+  while(1) {
+    xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+
+    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+    for(int i=0; i<8; i++) {
+      local_RX_Message[i] = RX_Message[i];
+    }
+    xSemaphoreGive(keyArrayMutex);
+
+    switch(local_RX_Message[0]) {
+      case 'R':
+        if(receiver){
+          local_stepsize = stepSizes[12];
+          local_key = 12*local_RX_Message[3] + local_RX_Message[2];
+
+          xSemaphoreTake(pressedMutex, portMAX_DELAY);
+          pressed[local_key] = 0;
+          xSemaphoreGive(pressedMutex);
+
+          __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
+        }
+        break;
+      
+      case 'P':
+
+        if(receiver){
+          relative_octive = local_RX_Message[1] - 4;
+          local_key = 12*local_RX_Message[3] + local_RX_Message[2];
+
+          xSemaphoreTake(pressedMutex, portMAX_DELAY);
+          pressed[local_key] = 1;
+          xSemaphoreGive(pressedMutex);
+
+          if(relative_octive > 0){
+            local_stepsize = stepSizes[local_RX_Message[2]] << relative_octive;
+          }
+          else{
+            local_stepsize = stepSizes[local_RX_Message[2]] >> abs(relative_octive);
+          }
+
+          __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
+        }
+         break;
+
+      case 'K':
+        Volume.set_value(local_RX_Message[1]);
+        Octave.set_value(local_RX_Message[2] + position);
+        Waveform.set_value(local_RX_Message[3]);
+        break;
+
+      case 'H':
+        if(!west) {
+          if(!position_set) {
+            __atomic_store_n(&position, local_RX_Message[2] + 1, __ATOMIC_RELAXED);
+            __atomic_store_n(&position_set, true, __ATOMIC_RELAXED);
+            
+            if(!east) {
+              broadcastEndHandshake();
+            }
+            else{
+              setOutMuxBit(HKOE_BIT, LOW);
+              delayMicroseconds(1000000);
+              broadcastPosition();
+            }
+          }
+        }
+        break;
+      case 'E':
+        if(position == 0) {
+          __atomic_store_n(&receiver, true, __ATOMIC_RELAXED);
+        }
+        else {
+          __atomic_store_n(&receiver, false, __ATOMIC_RELAXED);
+        }
+        Octave.set_value(position + 4);
+        break;
+    }
+  }
+}
+
+void checkBoards() {
+  xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+  if(~keyArray[5] & 1) { //detect west
+    __atomic_store_n(&west, true, __ATOMIC_RELAXED);
+  }
+  else if(~keyArray[6] & 1) { //detect east
+    __atomic_store_n(&east, false, __ATOMIC_RELAXED);
+  }
+  xSemaphoreGive(keyArrayMutex);
+
+  if(!west) { //leftmost board
+    __atomic_store_n(&position, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&position_set, true, __ATOMIC_RELAXED);
+ 
+    if(!east) { //Only one module - end handshake
+      CAN_Init(true);
+    }
+  }
+}
+
+void initialHandshake() {
+  if(position_set) {
+    if(!east) {
+      Octave.set_value(position+4);
+    }
+    else{
+      setOutMuxBit(HKOE_BIT, LOW);
+      delayMicroseconds(1000000);
+      broadcastPosition();
+    }
+  }
+}
+
+void setup() {
+
+  //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
   pinMode(RA1_PIN, OUTPUT);
   pinMode(RA2_PIN, OUTPUT);
@@ -515,64 +562,99 @@ void setup()
   pinMode(JOYX_PIN, INPUT);
   pinMode(JOYY_PIN, INPUT);
 
-  // Initialise display
-  setOutMuxBit(DRST_BIT, LOW); // Assert display logic reset
+  //Initialise display
+  setOutMuxBit(DRST_BIT, LOW);  //Assert display logic reset
   delayMicroseconds(2);
-  setOutMuxBit(DRST_BIT, HIGH); // Release display logic reset
+  setOutMuxBit(DRST_BIT, HIGH);  //Release display logic reset
   u8g2.begin();
-  setOutMuxBit(DEN_BIT, HIGH); // Enable display power supply
+  setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
 
-  // Initialise UART
+  //Initialise UART
   Serial.begin(9600);
-  Serial.println("Hello World");
 
-  // Timer
+  //settimer
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
   sampleTimer->setOverflow(22000, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
 
-  // Initialise CAN
-  CAN_Init(true);
-  setCANFilter(0x123, 0x7ff);
-  CAN_Start();
+  //Initialise CAN
+  CAN_Init(false);
+  setCANFilter(0x123,0x7ff);
+  CAN_RegisterRX_ISR(CAN_RX_ISR);
+  CAN_RegisterTX_ISR(CAN_TX_ISR);
 
+  //Initialise Queues
+  msgInQ = xQueueCreate(36,8);
+  msgOutQ = xQueueCreate(36,8);
+
+  //mutex and semaphores
+  keyArrayMutex = xSemaphoreCreateMutex();
+  CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
+  pressedMutex = xSemaphoreCreateMutex();
+
+  //Initialise Threads
   TaskHandle_t scanKeysHandle = NULL;
   xTaskCreate(
-      scanKeysTask,     /* Function that implements the task */
-      "scanKeys",       /* Text name for the task */
-      64,               /* Stack size in words, not bytes */
-      NULL,             /* Parameter passed into the task */
-      2,                /* Task priority */
-      &scanKeysHandle); /* Pointer to store the task handle */
+  scanKeysTask,		/* Function that implements the task */
+  "scanKeys",		/* Text name for the task */
+  256,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */
+  2,			/* Task priority */
+  &scanKeysHandle );	/* Pointer to store the task handle */
 
   TaskHandle_t displayUpdateHandle = NULL;
   xTaskCreate(
-      displayUpdateTask,     /* Function that implements the task */
-      "displayUpdate",       /* Text name for the task */
-      256,                   /* Stack size in words, not bytes */
-      NULL,                  /* Parameter passed into the task */
-      1,                     /* Task priority */
-      &displayUpdateHandle); /* Pointer to store the task handle */
+  displayUpdateTask,		/* Function that implements the task */
+  "displayUpdate",		/* Text name for the task */
+  256,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */
+  1,			/* Task priority */
+  &displayUpdateHandle );	/* Pointer to store the task handle */
 
-  // TaskHandle_t vibratoHandle = NULL;
-  // xTaskCreate(
-  //     vibratoTask,     /* Function that implements the task */
-  //     "vibrato",       /* Text name for the task */
-  //     64,              /* Stack size in words, not bytes */
-  //     NULL,            /* Parameter passed into the task */
-  //     1,               /* Task priority */
-  //     &vibratoHandle); /* Pointer to store the task handle */
+  TaskHandle_t decodeHandle = NULL;
+  xTaskCreate(
+  decodeTask,		/* Function that implements the task */
+  "decode",		/* Text name for the task */
+  256,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */
+  1,			/* Task priority */
+  &decodeHandle );
+
+  TaskHandle_t txHandle = NULL;
+  xTaskCreate(
+  CAN_TX_Task,		/* Function that implements the task */
+  "tx",		/* Text name for the task */
+  256,      		/* Stack size in words, not bytes */
+  NULL,			/* Parameter passed into the task */
+  1,			/* Task priority */
+  &txHandle );
 
   joyXbias = analogRead(A1);
-  joyYbias = analogRead(A0);
 
-  keyArrayMutex = xSemaphoreCreateMutex();
+  //initialise handshake
+  setOutMuxBit(HKOW_BIT, HIGH);  //Enable west handshake
+  setOutMuxBit(HKOE_BIT, HIGH);  //Enable east handshake
+
+  delayMicroseconds(2000000); //wait 2 sec for other boards to start
+
+  xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+  for(int i = 5; i <= 6; i++) { //read east and west
+    setRow(i);
+    delayMicroseconds(2);
+    keyArray[i] = readCols();
+  }
+  xSemaphoreGive(keyArrayMutex);
+
+  checkBoards();
+  CAN_Start();
+  delayMicroseconds(1000000);
+  initialHandshake();
 
   vTaskStartScheduler();
 }
 
-void loop()
-{
+void loop() {
+  
 }
