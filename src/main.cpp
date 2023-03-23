@@ -41,10 +41,10 @@ const int HKOE_BIT = 6;
 //Step Size and notes
 const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
 const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
-volatile uint8_t keyArray[7];
 const uint8_t key_size = 36;
+volatile uint8_t keyArray[7];
 volatile uint32_t currentStepSize[key_size] = {0};
-volatile int step;
+volatile uint8_t pressed[key_size] = {0};
 
 //Multiple Modules
 bool receiver = true;
@@ -144,7 +144,7 @@ void sampleISR() {
   Vout = (int)Vout >> (8 - Volume.value);
 
   Vout = std::max(std::min((int)Vout, 127), -128);
-  
+
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -193,8 +193,6 @@ void scanKeysTask(void * pvParameters) {
 
   int local_key;
   int local_stepsize;
-
-  uint8_t pressed[12] = {0};
 
   int relative_octive;
 
@@ -313,7 +311,15 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
     
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    u8g2.drawStr(2, 10, notes[step].c_str());
+    int count = 0;
+    for(int i=0; i<key_size; i++) {
+      if(pressed[i] == 1) {
+        Serial.println(count);
+        u8g2.drawStr(2 + 15*count, 10, notes[i%12].c_str());
+        count++;
+      }
+      
+    }
 
     u8g2.setCursor(2,20);
     u8g2.print(keyArray[2], HEX);
@@ -363,7 +369,7 @@ void broadcastEndHandshake() {
   uint8_t TX_Message[8] = {0};
 
   if(position != 0) {
-    receiver = false;
+    __atomic_store_n(&receiver, false, __ATOMIC_RELAXED);
   }
   Octave.set_value(position + 4);
   TX_Message[0] = 'E';
@@ -387,6 +393,7 @@ void decodeTask(void * pvParameters) {
         if(receiver){
           local_stepsize = stepSizes[12];
           local_key = 12*RX_Message[3] + RX_Message[2];
+          pressed[local_key] = 0;
           __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
         }
         break;
@@ -396,6 +403,7 @@ void decodeTask(void * pvParameters) {
         if(receiver){
           relative_octive = RX_Message[1] - 4;
           local_key = 12*RX_Message[3] + RX_Message[2];
+          pressed[local_key] = 1;
           Serial.println(local_key);
           if(relative_octive > 0){
             local_stepsize = stepSizes[RX_Message[2]] << relative_octive;
@@ -437,10 +445,10 @@ void decodeTask(void * pvParameters) {
       case 'E':
         Serial.println("Received E");
         if(position == 0) {
-          receiver = true;
+          __atomic_store_n(&receiver, true, __ATOMIC_RELAXED);
         }
         else {
-          receiver = false;
+          __atomic_store_n(&receiver, false, __ATOMIC_RELAXED);
         }
         Octave.set_value(position + 4);
         break;
@@ -458,13 +466,14 @@ void CAN_TX_Task (void * pvParameters) {
 }
 
 void checkBoards() {
+  xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
   if(~keyArray[5] & 1) {
     west = true;
   }
   else if(~keyArray[6] & 1) {
     east = true;
-
   }
+  xSemaphoreGive(keyArrayMutex);
 
   if(!west) {
     //leftmost board
