@@ -71,6 +71,14 @@ Knob Volume(8, 8, 0, 0);
 Knob Octave(4, 7, 1, 1);
 Knob Waveform(0, 3, 0, 2);
 
+<<<<<<< Updated upstream
+=======
+//joystick
+volatile int32_t bstep = 0;
+volatile int joyXbias;
+int bend;
+
+>>>>>>> Stashed changes
 //waveforms
 const unsigned char sinetable[128] = {
     0,   0,   0,   0,   1,   1,   1,   2,   2,   3,   4,   5,   5,   6,   7,   9,
@@ -107,6 +115,23 @@ void sampleISR() {
 
   for (int i = 0; i < key_size; i++) {
     if (currentStepSize[i] != 0) {
+<<<<<<< Updated upstream
+=======
+      
+      if(bend > 0 && abs(bend) < 28) {
+        bend = 28;
+      }
+      else if(bend <= 0 && abs(bend) < 28) {
+        bend = -28;
+      }
+
+      bstep = bend * -17961;
+
+      if (abs(bend) < 50)
+      {
+        bstep = 0;
+      }
+>>>>>>> Stashed changes
       
       phaseAcc[i] += (int)(currentStepSize[i]);
 
@@ -121,10 +146,17 @@ void sampleISR() {
       else if (wavetype == 2) {
         // Triangle - <128 linear increase, >128 linear decrease
         if ((phaseAcc[i] >> 24) >= 128) {
+<<<<<<< Updated upstream
           Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 127;
         }
         else {
           Vout += (phaseAcc[i] >> 23) - 128;
+=======
+          Vout += (((255 - (phaseAcc[i] >> 24)) * 2) - 127);
+        }
+        else {
+          Vout += ((phaseAcc[i] >> 23) - 128);
+>>>>>>> Stashed changes
         }
       }
       else if (wavetype == 3) {
@@ -138,7 +170,11 @@ void sampleISR() {
           idx = phaseAcc[i] >> 24;
         }
 
+<<<<<<< Updated upstream
         Vout += sinetable[idx] - 128;
+=======
+        Vout += (sinetable[idx] - 128);
+>>>>>>> Stashed changes
       }
     }
   }
@@ -201,6 +237,7 @@ void scanKeysTask(void * pvParameters) {
   int vol = 0;
   int oct = 0;
   int wavetype = 0;
+  int joyX;
 
   int local_key;
   int local_stepsize;
@@ -297,8 +334,16 @@ void scanKeysTask(void * pvParameters) {
       Volume.read_knob();
       Octave.read_knob();
       Waveform.read_knob();
+<<<<<<< Updated upstream
 
       if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){ //change to knobs
+=======
+      joyX = analogRead(A1);
+
+      bend = joyX - joyXbias;
+
+      if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){
+>>>>>>> Stashed changes
 
         TX_Message[0] = 'K';
         TX_Message[1] = Volume.value;
