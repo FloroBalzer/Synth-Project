@@ -2,7 +2,6 @@
 
 ## Table of Contents <!-- omit from toc -->
 - [Tasks](#tasks)
-  - [A characterisation of each task with its theoretical minimum initiation interval and measuredmaximum execution time (this should go in the tasks section above)](#a-characterisation-of-each-task-with-its-theoretical-minimum-initiation-interval-and-measuredmaximum-execution-time-this-should-go-in-the-tasks-section-above)
 - [A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are metunder worst-case conditions](#a-critical-instant-analysis-of-the-rate-monotonic-scheduler-showing-that-all-deadlines-are-metunder-worst-case-conditions)
 - [A quantification of total CPU utilisation](#a-quantification-of-total-cpu-utilisation)
 - [Shared Data Structures](#shared-data-structures)
@@ -11,18 +10,15 @@
 ## Tasks
 ___
 
-| Name              | Type of Task | Rate of execution                             | Minimum Initiation Interval  | Maximum Execution Time (ms) |
+| Name              | Type of Task | Rate of execution                             | Minimum Initiation Interval  | Maximum Execution Time ($\mu$s) |
 |-------------------|--------------|-----------------------------------------------|------------------------------|-----------------------------|
 | SampleISR         | Interrupt    | 22 KHz                                        |                              |                             |
 | CAN_RX_ISR        | Interrupt    | After a message is received on the can bus    |                              |                             |
 | CAN_TX_ISR        | Interrupt    | After a message is transmitted on the CAN bus |                              |                             |
 | CAN_TX_Task       | Thread       | When a message is added to the outgoing queue |                              |                             |
-| scanKeysTask      | Thread       | 20ms                                          |                              | 12.725                      |
-| displayUpdateTask | Thread       | 100ms                                         |                              |                             |
-| decodeTask        | Thread       | When a message is added to the incoming queue |                              |                             |
-
-### A characterisation of each task with its theoretical minimum initiation interval and measuredmaximum execution time (this should go in the tasks section above)
-
+| scanKeysTask      | Thread       | 20ms                                          |                              | 398                         |
+| displayUpdateTask | Thread       | 100ms                                         |                              | 16743                       |
+| decodeTask        | Thread       | When a message is added to the incoming queue |                              | 16                          |
 
 
 ## A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are metunder worst-case conditions

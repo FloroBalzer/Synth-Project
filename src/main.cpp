@@ -11,18 +11,18 @@
 ////////control disabling threads == comment out the thread you want to test ==> normal mode == all the thread definitions commented out
 
 // #define DISABLE_THREADS_Scankeys
-#define DISABLE_THREADS_decodeTask
-#define DISABLE_THREADS_displayUpdateHandle
-#define DISABLE_THREADS_CAN_TX_Task
+// #define DISABLE_THREADS_displayUpdateHandle
+// #define DISABLE_THREADS_decodeTask
+// #define DISABLE_THREADS_CAN_TX_Task
 
 ///////// directives to deactivate the statements that attach ISRs.
 
-#define Disable_CAN_RegisterRX_TX_ISR
-#define Disable_attachInterrupt_sampleISR
-#define Disable_msgque
+// #define Disable_CAN_RegisterRX_TX_ISR
+// #define Disable_attachInterrupt_sampleISR
+// #define Disable_msgque
 
 //////////////////////// if test define it will work
-#define TEST_SCANKEYS
+// #define TEST_SCANKEYS
 // #define TEST_DISPLAY
 // #define TEST_DECODE
 // #define TEST_CAN
@@ -200,7 +200,15 @@ void CAN_TX_ISR (void) {
 void CAN_TX_Task (void * pvParameters) {
 	uint8_t msgOut[8];
 	while (1) {
-	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+    #ifndef TEST_CAN
+	  xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+    #else
+    msgOut[0] = 'P';
+    msgOut[1] = 2;
+    msgOut[2] = 3;
+    msgOut[3] = 1;
+    #endif
+
 		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
 		CAN_TX(0x123, msgOut);
     #ifdef TEST_CAN
@@ -218,7 +226,6 @@ void setRow(uint8_t rowIdx) {
   digitalWrite(RA1_PIN, RA1);
   digitalWrite(RA0_PIN, RA0);
   digitalWrite(REN_PIN,HIGH);
-
 }
 
 uint8_t readCols() {
@@ -380,10 +387,13 @@ void displayUpdateTask(void * pvParameters) {
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
     xSemaphoreTake(pressedMutex, portMAX_DELAY);
     int count = 0;
-  
+
+    #ifdef TEST_DISPLAY
+    uint8_t pressed[key_size] = {1};
+    #endif
+
     for(int i=0; i<key_size; i++) { //display keys played
       if(pressed[i] == 1) {
-        Serial.println(count);
         u8g2.drawStr(2 + 15*count, 10, notes[i%12].c_str());
         count++;
       }
@@ -461,7 +471,16 @@ void decodeTask(void * pvParameters) {
   uint8_t local_RX_Message[8] = {0};
 
   while(1) {
+    #ifndef TEST_DECODE
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+    #endif
+
+    #ifdef TEST_DECODE
+    RX_Message[0] = 'P';
+    RX_Message[1] = 2;
+    RX_Message[2] = 3;
+    RX_Message[3] = 1;
+    #endif
 
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
     for(int i=0; i<8; i++) {
@@ -684,7 +703,6 @@ void setup() {
   //Init Joystick Bias
   __atomic_store_n(&joyXbias, analogRead(A1), __ATOMIC_RELAXED);
 
-
   //initialise handshake
   setOutMuxBit(HKOW_BIT, HIGH);  //Enable west handshake
   setOutMuxBit(HKOE_BIT, HIGH);  //Enable east handshake
@@ -711,39 +729,39 @@ void setup() {
       ;
   #endif
 
-  // #ifdef TEST_DISPLAY
-  //   uint32_t startTime = micros();
-  //   for (int iter = 0; iter < 32; iter++)
-  //   {
-  //     scanKeysTask(nullptr);
-  //   }
-  //   Serial.println(micros() - startTime);
-  //   while (1)
-  //     ;
-  // #endif
+  #ifdef TEST_DISPLAY
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++)
+    {
+      displayUpdateTask(nullptr);
+    }
+    Serial.println(micros() - startTime);
+    while (1)
+      ;
+  #endif
 
-  // #ifdef TEST_DECODE
-  //   uint32_t startTime = micros();
-  //   for (int iter = 0; iter < 32; iter++)
-  //   {
-  //     scanKeysTask(nullptr);
-  //   }
-  //   Serial.println(micros() - startTime);
-  //   while (1)
-  //     ;
-  // #endif
+  #ifdef TEST_DECODE
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++)
+    {
+      decodeTask(nullptr);
+    }
+    Serial.println(micros() - startTime);
+    while (1)
+      ;
+  #endif
 
 
-  // #ifdef TEST_CAN
-  //   uint32_t startTime = micros();
-  //   for (int iter = 0; iter < 32; iter++)
-  //   {
-  //     scanKeysTask(nullptr);
-  //   }
-  //   Serial.println(micros() - startTime);
-  //   while (1)
-  //     ;
-  // #endif
+  #ifdef TEST_CAN
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++)
+    {
+      CAN_TX_Task(nullptr);
+    }
+    Serial.println(micros() - startTime);
+    while (1)
+      ;
+  #endif
 
 
 
