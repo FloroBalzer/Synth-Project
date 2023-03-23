@@ -7,6 +7,17 @@
 - [Shared Data Structures](#shared-data-structures)
 - [An analysis of inter-task blocking dependencies that shows any possibility of deadlock](#an-analysis-of-inter-task-blocking-dependencies-that-shows-any-possibility-of-deadlock)
 
+## Introduction:
+This implementation of a modular keyboard on the STM32 contains a variety of functions. The use of these functions will be explained in this section.
+###Knobs:
+- Counting from the left, *Knob 1* : Unassigned
+- *Knob 2: Waveform Select*. The design comes with 4 different waveforms with the following indexes: 0: Sawtooth, 1:Square, 2: Triangle, 3: Sine.
+- *Knob 3: Octave Control:* Selects the octave being played, from 1 to 7, with octave 4  having A at 440Hz.
+- *Knob 4 : Volume Control:* Set the output volume of the synth, varies between 0 and 8.
+
+
+
+
 ## Tasks
 ___
 
