@@ -47,9 +47,9 @@ volatile uint32_t currentStepSize[key_size] = {0};
 volatile uint8_t pressed[key_size] = {0};
 
 //Multiple Modules
-bool receiver = true;
 uint8_t position = 8;
-bool position_set;
+volatile bool receiver = true;
+volatile bool position_set;
 volatile bool east;
 volatile bool west;
 
@@ -63,6 +63,7 @@ QueueHandle_t msgOutQ;
 //mutex and semaphores
 SemaphoreHandle_t keyArrayMutex;
 SemaphoreHandle_t CAN_TX_Semaphore;
+SemaphoreHandle_t pressedMutex;
 
 //Knobs
 Knob Volume(8, 8, 0, 0);
@@ -228,6 +229,7 @@ void scanKeysTask(void * pvParameters) {
               }
               __atomic_store_n(&currentStepSize[local_key],local_stepsize, __ATOMIC_RELAXED);
             }
+            xSemaphoreTake(pressedMutex, portMAX_DELAY);
             if(!receiver && (!pressed[local_key]) ){
 
               TX_Message[0] = 'P';
@@ -238,12 +240,14 @@ void scanKeysTask(void * pvParameters) {
               xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
             }
             pressed[local_key] = 1;
+            xSemaphoreGive(pressedMutex);
           }
           else{
             
             if(receiver){
               __atomic_store_n(&currentStepSize[local_key],0, __ATOMIC_RELAXED);
             }
+            xSemaphoreTake(pressedMutex, portMAX_DELAY);
             if(!receiver && pressed[local_key]){
 
               TX_Message[0] = 'R';
@@ -254,23 +258,24 @@ void scanKeysTask(void * pvParameters) {
               xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
             }
             pressed[local_key] = 0;
+            xSemaphoreGive(pressedMutex);
           }
         }
       }
       else if(i==5) {
         if(~keys & 1) {
-          west = true;  
+          __atomic_store_n(&west, true, __ATOMIC_RELAXED);
         }
         else{
-          west = false;
+          __atomic_store_n(&west, false, __ATOMIC_RELAXED);
         }
       }
       else if(i==6) {
         if(~keys & 1) {
-          east = true;  
+          __atomic_store_n(&east, true, __ATOMIC_RELAXED);
         }
         else{
-          east = false;
+          __atomic_store_n(&east, false, __ATOMIC_RELAXED);
         }
       }
     }
@@ -312,14 +317,15 @@ void displayUpdateTask(void * pvParameters) {
     
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
     int count = 0;
+    xSemaphoreTake(pressedMutex, portMAX_DELAY);
     for(int i=0; i<key_size; i++) {
       if(pressed[i] == 1) {
         Serial.println(count);
         u8g2.drawStr(2 + 15*count, 10, notes[i%12].c_str());
         count++;
       }
-      
     }
+    xSemaphoreGive(pressedMutex);
 
     u8g2.setCursor(2,20);
     u8g2.print(keyArray[2], HEX);
@@ -385,15 +391,29 @@ void decodeTask(void * pvParameters) {
 
   int handshake_count = 0;
 
+  uint8_t local_RX_Message[8] = {0};
+
   while(1) {
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
 
-    switch(RX_Message[0]) {
+    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+
+    for(int i=0; i<8; i++) {
+      local_RX_Message[i] = RX_Message[i];
+    }
+
+    xSemaphoreGive(keyArrayMutex);
+
+    switch(local_RX_Message[0]) {
       case 'R':
         if(receiver){
           local_stepsize = stepSizes[12];
-          local_key = 12*RX_Message[3] + RX_Message[2];
+          local_key = 12*local_RX_Message[3] + local_RX_Message[2];
+
+          xSemaphoreTake(pressedMutex, portMAX_DELAY);
           pressed[local_key] = 0;
+          xSemaphoreGive(pressedMutex);
+
           __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
         }
         break;
@@ -401,24 +421,28 @@ void decodeTask(void * pvParameters) {
       case 'P':
 
         if(receiver){
-          relative_octive = RX_Message[1] - 4;
-          local_key = 12*RX_Message[3] + RX_Message[2];
+          relative_octive = local_RX_Message[1] - 4;
+          local_key = 12*local_RX_Message[3] + local_RX_Message[2];
+
+          xSemaphoreTake(pressedMutex, portMAX_DELAY);
           pressed[local_key] = 1;
+          xSemaphoreGive(pressedMutex);
+
           Serial.println(local_key);
           if(relative_octive > 0){
-            local_stepsize = stepSizes[RX_Message[2]] << relative_octive;
+            local_stepsize = stepSizes[local_RX_Message[2]] << relative_octive;
           }
           else{
-            local_stepsize = stepSizes[RX_Message[2]] >> abs(relative_octive);
+            local_stepsize = stepSizes[local_RX_Message[2]] >> abs(relative_octive);
           }
           __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
         }
          break;
 
       case 'K':
-        Volume.set_value(RX_Message[1]);
-        Octave.set_value(RX_Message[2] + position);
-        Waveform.set_value(RX_Message[3]);
+        Volume.set_value(local_RX_Message[1]);
+        Octave.set_value(local_RX_Message[2] + position);
+        Waveform.set_value(local_RX_Message[3]);
         break;
 
       case 'H':
@@ -428,8 +452,8 @@ void decodeTask(void * pvParameters) {
         }
         if(!west) {
           if(!position_set) {
-            position = RX_Message[2] + 1;
-            position_set = true;
+            __atomic_store_n(&position, local_RX_Message[2] + 1, __ATOMIC_RELAXED);
+            __atomic_store_n(&position_set, true, __ATOMIC_RELAXED);
             if(!east) {
               Serial.println("End");
               broadcastEndHandshake();
@@ -468,17 +492,18 @@ void CAN_TX_Task (void * pvParameters) {
 void checkBoards() {
   xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
   if(~keyArray[5] & 1) {
-    west = true;
+    __atomic_store_n(&west, true, __ATOMIC_RELAXED);
   }
   else if(~keyArray[6] & 1) {
-    east = true;
+    __atomic_store_n(&east, false, __ATOMIC_RELAXED);
   }
   xSemaphoreGive(keyArrayMutex);
 
   if(!west) {
     //leftmost board
-    position = 0;
-    position_set = true;
+    __atomic_store_n(&position, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&position_set, true, __ATOMIC_RELAXED);
+
 
     if(!east) {
       //Only one module - end handshake
@@ -550,6 +575,7 @@ void setup() {
   //mutex and semaphores
   keyArrayMutex = xSemaphoreCreateMutex();
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
+  pressedMutex = xSemaphoreCreateMutex();
 
   //Initialise Threads
   TaskHandle_t scanKeysHandle = NULL;
