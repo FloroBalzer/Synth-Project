@@ -4,6 +4,7 @@
 #include <string>
 #include <STM32FreeRTOS.h>
 #include <ES_CAN.h>
+#include <algorithm>
 
 #include "knobs.h"
 
@@ -45,13 +46,10 @@ const uint8_t key_size = 36;
 volatile uint32_t currentStepSize[key_size] = {0};
 volatile int step;
 
-//
+//Multiple Modules
 bool receiver = true;
 uint8_t position = 8;
 bool position_set;
-
-bool externalKeyPressed;
-
 volatile bool east;
 volatile bool west;
 
@@ -102,59 +100,33 @@ void sampleISR() {
 
   static uint32_t phaseAcc[key_size] = {0};
 
-  // start bend
-  // end bend
   int wavetype = Waveform.value;
   int32_t Vout = 0;
 
   for (int i = 0; i < key_size; i++) {
     if (currentStepSize[i] != 0) {
-
-      //     int bend = abs(joyX - joyXbias);
-      //     if (bend < 28)
-      //     {
-      //       bend = 28;
-      //     }
-      //     if (joyX > joyXbias)
-      //     {
-      //       bstep = bend * 17961;
-      //     }
-      //     if (joyX <= joyXbias)
-      //     {
-      //       bstep = bend * -17961;
-      //     }
-      //     if (bend < 50)
-      //     {
-      //       bstep = 0;
-      //     }
-      //   }
-      //   else
-      //   {
-      //     bstep = 0;
-      //   }
       
       phaseAcc[i] += (int)(currentStepSize[i]);
 
       if (wavetype == 0) {
-        // Sawtooth
+        // Sawtooth - linear increase
         Vout += (int)(phaseAcc[i] >> 24) - 128;
       }
       else if (wavetype == 1) {
-        // Square
+        // Square - set high or low
         Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
       }
       else if (wavetype == 2) {
-        // Triangle
+        // Triangle - <128 linear increase, >128 linear decrease
         if ((phaseAcc[i] >> 24) >= 128) {
           Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 127;
         }
         else {
-          // equivalent to phaseAcc[i] >> 24 * 2
           Vout += (phaseAcc[i] >> 23) - 128;
         }
       }
       else if (wavetype == 3) {
-        // sinusoid
+        // sinusoid - lookup table
         int idx;
 
         if ((phaseAcc[i] >> 24) >= 128) {
@@ -170,13 +142,9 @@ void sampleISR() {
   }
 
   Vout = (int)Vout >> (8 - Volume.value);
-  if (Vout > 127) {
-    Vout = 127;
-  }
-  else if (Vout < -128) {
-    Vout = 128;
-  }
 
+  Vout = std::max(std::min((int)Vout, 127), -128);
+  
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
