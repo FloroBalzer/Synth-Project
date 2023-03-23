@@ -42,6 +42,7 @@ const int HKOE_BIT = 6;
 const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
 const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
 const uint8_t key_size = 36;
+
 volatile uint8_t keyArray[7];
 volatile uint32_t currentStepSize[key_size] = {0};
 volatile uint8_t pressed[key_size] = {0};
@@ -219,7 +220,8 @@ void scanKeysTask(void * pvParameters) {
 
           local_key = 3-j +(i*4);
 
-          if (~keys & (1 << j)) {
+          if (~keys & (1 << j)) { //key pressed
+            
             if(receiver){
               if(relative_octive > 0){
                 local_stepsize = stepSizes[local_key] << relative_octive;
@@ -227,29 +229,31 @@ void scanKeysTask(void * pvParameters) {
               else{
                 local_stepsize = stepSizes[local_key] >> abs(relative_octive);
               }
-              __atomic_store_n(&currentStepSize[local_key],local_stepsize, __ATOMIC_RELAXED);
+              __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
             }
-            xSemaphoreTake(pressedMutex, portMAX_DELAY);
-            if(!receiver && (!pressed[local_key]) ){
 
+            xSemaphoreTake(pressedMutex, portMAX_DELAY);
+            if(!receiver && (!pressed[local_key]) ){ //newly pressed
+              
               TX_Message[0] = 'P';
               TX_Message[1] = Octave.value;
               TX_Message[2] = local_key;
               TX_Message[3] = position;
 
-              xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
+              xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
             }
             pressed[local_key] = 1;
             xSemaphoreGive(pressedMutex);
           }
-          else{
+          else{ //key not pressed
             
             if(receiver){
-              __atomic_store_n(&currentStepSize[local_key],0, __ATOMIC_RELAXED);
+              __atomic_store_n(&currentStepSize[local_key], 0, __ATOMIC_RELAXED);
             }
-            xSemaphoreTake(pressedMutex, portMAX_DELAY);
-            if(!receiver && pressed[local_key]){
 
+            xSemaphoreTake(pressedMutex, portMAX_DELAY);
+            if(!receiver && pressed[local_key]){ //newly released
+              
               TX_Message[0] = 'R';
               TX_Message[1] = Octave.value;
               TX_Message[2] = local_key;
@@ -263,15 +267,15 @@ void scanKeysTask(void * pvParameters) {
         }
       }
       else if(i==5) {
-        if(~keys & 1) {
+        if(~keys & 1) { //detect west
           __atomic_store_n(&west, true, __ATOMIC_RELAXED);
         }
         else{
           __atomic_store_n(&west, false, __ATOMIC_RELAXED);
         }
       }
-      else if(i==6) {
-        if(~keys & 1) {
+      else if(i==6) { 
+        if(~keys & 1) { //detect east
           __atomic_store_n(&east, true, __ATOMIC_RELAXED);
         }
         else{
@@ -284,7 +288,8 @@ void scanKeysTask(void * pvParameters) {
       Volume.read_knob();
       Octave.read_knob();
       Waveform.read_knob();
-      if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){
+
+      if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){ //change to knobs
 
         TX_Message[0] = 'K';
         TX_Message[1] = Volume.value;
@@ -292,11 +297,11 @@ void scanKeysTask(void * pvParameters) {
         TX_Message[3] = Waveform.value;
 
         xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-      }
 
-      vol = Volume.value;
-      oct = Octave.value;
-      wavetype = Waveform.value;
+        vol = Volume.value;
+        oct = Octave.value;
+        wavetype = Waveform.value;
+      }
     }
   }
 }
