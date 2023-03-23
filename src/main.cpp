@@ -161,6 +161,15 @@ void CAN_TX_ISR (void) {
 	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
 }
 
+void CAN_TX_Task (void * pvParameters) {
+	uint8_t msgOut[8];
+	while (1) {
+	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+		CAN_TX(0x123, msgOut);
+	}
+}
+
 void setRow(uint8_t rowIdx) {
   digitalWrite(REN_PIN,LOW);
   unsigned char RA2 = rowIdx & 0b00000100; //RA2
@@ -388,7 +397,6 @@ void broadcastEndHandshake() {
   xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
 }
 
-
 void decodeTask(void * pvParameters) {
 
   int local_stepsize;
@@ -475,15 +483,6 @@ void decodeTask(void * pvParameters) {
         break;
     }
   }
-}
-
-void CAN_TX_Task (void * pvParameters) {
-	uint8_t msgOut[8];
-	while (1) {
-	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
-		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
-		CAN_TX(0x123, msgOut);
-	}
 }
 
 void checkBoards() {
