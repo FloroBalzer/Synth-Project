@@ -44,7 +44,7 @@ ___
 | Name              | Type of Task | Rate of execution                             | Minimum Initiation Interval  | Maximum Execution Time ($\mu$s) |
 |-------------------|--------------|-----------------------------------------------|------------------------------|-----------------------------|
 | SampleISR         | Interrupt    | 22 KHz                                        |                              |                             |
-| CAN_RX_ISR        | Interrupt    | After a message is received on the can bus    |                              |                             |
+| CAN_RX_ISR        | Interrupt    | After a message is received on the CAN bus    |                              |                             |
 | CAN_TX_ISR        | Interrupt    | After a message is transmitted on the CAN bus |                              |                             |
 | CAN_TX_Task       | Thread       | When a message is added to the outgoing queue |                              |                             |
 | scanKeysTask      | Thread       | 20ms                                          |                              | 398                         |
@@ -52,7 +52,7 @@ ___
 | decodeTask        | Thread       | When a message is added to the incoming queue |                              | 16                          |
 
 
-## A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are metunder worst-case conditions
+## A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met under worst-case conditions
 ___
 
 ## A quantification of total CPU utilisation
