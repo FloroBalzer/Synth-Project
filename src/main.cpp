@@ -42,15 +42,14 @@ const int HKOE_BIT = 6;
 const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
 const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
 const uint8_t key_size = 36;
-
 volatile uint8_t keyArray[7];
 volatile uint32_t currentStepSize[key_size] = {0};
 volatile uint8_t pressed[key_size] = {0};
 
 //Multiple Modules
+bool receiver = true;
 uint8_t position = 8;
-volatile bool receiver = true;
-volatile bool position_set;
+bool position_set;
 volatile bool east;
 volatile bool west;
 
@@ -64,7 +63,6 @@ QueueHandle_t msgOutQ;
 //mutex and semaphores
 SemaphoreHandle_t keyArrayMutex;
 SemaphoreHandle_t CAN_TX_Semaphore;
-SemaphoreHandle_t pressedMutex;
 
 //Knobs
 Knob Volume(8, 8, 0, 0);
@@ -75,7 +73,6 @@ Knob Waveform(0, 3, 0, 2);
 volatile int32_t bstep = 0;
 volatile int joyX = 563;
 volatile int joyXbias;
-
 
 //waveforms
 const unsigned char sinetable[128] = {
@@ -113,7 +110,6 @@ void sampleISR() {
 
   for (int i = 0; i < key_size; i++) {
     if (currentStepSize[i] != 0) {
-
       int bend = abs(joyX - joyXbias);
       if (bend < 28)
       {
@@ -145,10 +141,10 @@ void sampleISR() {
       else if (wavetype == 2) {
         // Triangle - <128 linear increase, >128 linear decrease
         if ((phaseAcc[i] >> 24) >= 128) {
-          Vout += 2*(((255 - (phaseAcc[i] >> 24)) * 2) - 127);
+          Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 127;
         }
         else {
-          Vout += 2*((phaseAcc[i] >> 23) - 128);
+          Vout += (phaseAcc[i] >> 23) - 128;
         }
       }
       else if (wavetype == 3) {
@@ -162,7 +158,7 @@ void sampleISR() {
           idx = phaseAcc[i] >> 24;
         }
 
-        Vout += 2*(sinetable[idx] - 128);
+        Vout += sinetable[idx] - 128;
       }
     }
   }
@@ -183,15 +179,6 @@ void CAN_RX_ISR (void) {
 
 void CAN_TX_ISR (void) {
 	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
-}
-
-void CAN_TX_Task (void * pvParameters) {
-	uint8_t msgOut[8];
-	while (1) {
-	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
-		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
-		CAN_TX(0x123, msgOut);
-	}
 }
 
 void setRow(uint8_t rowIdx) {
@@ -253,8 +240,7 @@ void scanKeysTask(void * pvParameters) {
 
           local_key = 3-j +(i*4);
 
-          if (~keys & (1 << j)) { //key pressed
-            
+          if (~keys & (1 << j)) {
             if(receiver){
               if(relative_octive > 0){
                 local_stepsize = stepSizes[local_key] << relative_octive;
@@ -262,31 +248,26 @@ void scanKeysTask(void * pvParameters) {
               else{
                 local_stepsize = stepSizes[local_key] >> abs(relative_octive);
               }
-              __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
+              __atomic_store_n(&currentStepSize[local_key],local_stepsize, __ATOMIC_RELAXED);
             }
+            if(!receiver && (!pressed[local_key]) ){
 
-            xSemaphoreTake(pressedMutex, portMAX_DELAY);
-            if(!receiver && (!pressed[local_key]) ){ //newly pressed
-              
               TX_Message[0] = 'P';
               TX_Message[1] = Octave.value;
               TX_Message[2] = local_key;
               TX_Message[3] = position;
 
-              xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+              xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
             }
             pressed[local_key] = 1;
-            xSemaphoreGive(pressedMutex);
           }
-          else{ //key not pressed
+          else{
             
             if(receiver){
-              __atomic_store_n(&currentStepSize[local_key], 0, __ATOMIC_RELAXED);
+              __atomic_store_n(&currentStepSize[local_key],0, __ATOMIC_RELAXED);
             }
+            if(!receiver && pressed[local_key]){
 
-            xSemaphoreTake(pressedMutex, portMAX_DELAY);
-            if(!receiver && pressed[local_key]){ //newly released
-              
               TX_Message[0] = 'R';
               TX_Message[1] = Octave.value;
               TX_Message[2] = local_key;
@@ -295,24 +276,23 @@ void scanKeysTask(void * pvParameters) {
               xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
             }
             pressed[local_key] = 0;
-            xSemaphoreGive(pressedMutex);
           }
         }
       }
       else if(i==5) {
-        if(~keys & 1) { //detect west
-          __atomic_store_n(&west, true, __ATOMIC_RELAXED);
+        if(~keys & 1) {
+          west = true;  
         }
         else{
-          __atomic_store_n(&west, false, __ATOMIC_RELAXED);
+          west = false;
         }
       }
-      else if(i==6) { 
-        if(~keys & 1) { //detect east
-          __atomic_store_n(&east, true, __ATOMIC_RELAXED);
+      else if(i==6) {
+        if(~keys & 1) {
+          east = true;  
         }
         else{
-          __atomic_store_n(&east, false, __ATOMIC_RELAXED);
+          east = false;
         }
       }
     }
@@ -322,8 +302,7 @@ void scanKeysTask(void * pvParameters) {
       Octave.read_knob();
       Waveform.read_knob();
       joyX = analogRead(A1);
-
-      if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){ //change to knobs
+      if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){
 
         TX_Message[0] = 'K';
         TX_Message[1] = Volume.value;
@@ -331,11 +310,11 @@ void scanKeysTask(void * pvParameters) {
         TX_Message[3] = Waveform.value;
 
         xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-
-        vol = Volume.value;
-        oct = Octave.value;
-        wavetype = Waveform.value;
       }
+
+      vol = Volume.value;
+      oct = Octave.value;
+      wavetype = Waveform.value;
     }
   }
 }
@@ -343,6 +322,9 @@ void scanKeysTask(void * pvParameters) {
 void displayUpdateTask(void * pvParameters) {
   const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
+
+  //CAN Bus
+  uint32_t ID;
 
   while(1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
@@ -352,19 +334,17 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
     
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    xSemaphoreTake(pressedMutex, portMAX_DELAY);
     int count = 0;
-  
-    for(int i=0; i<key_size; i++) { //display keys played
+    for(int i=0; i<key_size; i++) {
       if(pressed[i] == 1) {
         Serial.println(count);
         u8g2.drawStr(2 + 15*count, 10, notes[i%12].c_str());
         count++;
       }
+      
     }
-    xSemaphoreGive(pressedMutex);
 
-    u8g2.setCursor(2,20); 
+    u8g2.setCursor(2,20);
     u8g2.print(keyArray[2], HEX);
     u8g2.print(" ");
     u8g2.print(keyArray[1], HEX);
@@ -378,11 +358,9 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.drawStr(2, 30, "V: ");
     u8g2.setCursor(15,30);
     u8g2.print(Volume.value);
-
     u8g2.drawStr(25, 30, "O: ");
     u8g2.setCursor(40,30);
     u8g2.print(Octave.value);
-
     u8g2.drawStr(50, 30, "W: ");
     u8g2.setCursor(65,30);
     u8g2.print(Waveform.value);
@@ -391,7 +369,6 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.print((char) RX_Message[0]);
     u8g2.print(RX_Message[1]);
     u8g2.print(RX_Message[2]);
-    u8g2.print(RX_Message[3]);
 
     u8g2.sendBuffer();  // transfer internal memory to the display
     xSemaphoreGive(keyArrayMutex);
@@ -422,33 +399,24 @@ void broadcastEndHandshake() {
   xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
 }
 
+
 void decodeTask(void * pvParameters) {
 
   int local_stepsize;
   int relative_octive;
   int local_key;
 
-  uint8_t local_RX_Message[8] = {0};
+  int handshake_count = 0;
 
   while(1) {
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
 
-    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    for(int i=0; i<8; i++) {
-      local_RX_Message[i] = RX_Message[i];
-    }
-    xSemaphoreGive(keyArrayMutex);
-
-    switch(local_RX_Message[0]) {
+    switch(RX_Message[0]) {
       case 'R':
         if(receiver){
           local_stepsize = stepSizes[12];
-          local_key = 12*local_RX_Message[3] + local_RX_Message[2];
-
-          xSemaphoreTake(pressedMutex, portMAX_DELAY);
+          local_key = 12*RX_Message[3] + RX_Message[2];
           pressed[local_key] = 0;
-          xSemaphoreGive(pressedMutex);
-
           __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
         }
         break;
@@ -456,37 +424,37 @@ void decodeTask(void * pvParameters) {
       case 'P':
 
         if(receiver){
-          relative_octive = local_RX_Message[1] - 4;
-          local_key = 12*local_RX_Message[3] + local_RX_Message[2];
-
-          xSemaphoreTake(pressedMutex, portMAX_DELAY);
+          relative_octive = RX_Message[1] - 4;
+          local_key = 12*RX_Message[3] + RX_Message[2];
           pressed[local_key] = 1;
-          xSemaphoreGive(pressedMutex);
-
+          Serial.println(local_key);
           if(relative_octive > 0){
-            local_stepsize = stepSizes[local_RX_Message[2]] << relative_octive;
+            local_stepsize = stepSizes[RX_Message[2]] << relative_octive;
           }
           else{
-            local_stepsize = stepSizes[local_RX_Message[2]] >> abs(relative_octive);
+            local_stepsize = stepSizes[RX_Message[2]] >> abs(relative_octive);
           }
-
           __atomic_store_n(&currentStepSize[local_key], local_stepsize, __ATOMIC_RELAXED);
         }
          break;
 
       case 'K':
-        Volume.set_value(local_RX_Message[1]);
-        Octave.set_value(local_RX_Message[2] + position);
-        Waveform.set_value(local_RX_Message[3]);
+        Volume.set_value(RX_Message[1]);
+        Octave.set_value(RX_Message[2] + position);
+        Waveform.set_value(RX_Message[3]);
         break;
 
       case 'H':
+        Serial.println("Received H");
+        if(west){
+          handshake_count++;
+        }
         if(!west) {
           if(!position_set) {
-            __atomic_store_n(&position, local_RX_Message[2] + 1, __ATOMIC_RELAXED);
-            __atomic_store_n(&position_set, true, __ATOMIC_RELAXED);
-            
+            position = RX_Message[2] + 1;
+            position_set = true;
             if(!east) {
+              Serial.println("End");
               broadcastEndHandshake();
             }
             else{
@@ -498,6 +466,7 @@ void decodeTask(void * pvParameters) {
         }
         break;
       case 'E':
+        Serial.println("Received E");
         if(position == 0) {
           __atomic_store_n(&receiver, true, __ATOMIC_RELAXED);
         }
@@ -510,21 +479,32 @@ void decodeTask(void * pvParameters) {
   }
 }
 
+void CAN_TX_Task (void * pvParameters) {
+	uint8_t msgOut[8];
+	while (1) {
+	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+		CAN_TX(0x123, msgOut);
+	}
+}
+
 void checkBoards() {
   xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-  if(~keyArray[5] & 1) { //detect west
-    __atomic_store_n(&west, true, __ATOMIC_RELAXED);
+  if(~keyArray[5] & 1) {
+    west = true;
   }
-  else if(~keyArray[6] & 1) { //detect east
-    __atomic_store_n(&east, false, __ATOMIC_RELAXED);
+  else if(~keyArray[6] & 1) {
+    east = true;
   }
   xSemaphoreGive(keyArrayMutex);
 
-  if(!west) { //leftmost board
-    __atomic_store_n(&position, 0, __ATOMIC_RELAXED);
-    __atomic_store_n(&position_set, true, __ATOMIC_RELAXED);
- 
-    if(!east) { //Only one module - end handshake
+  if(!west) {
+    //leftmost board
+    position = 0;
+    position_set = true;
+
+    if(!east) {
+      //Only one module - end handshake
       CAN_Init(true);
     }
   }
@@ -581,6 +561,7 @@ void setup() {
 
   //Initialise CAN
   CAN_Init(false);
+  // CAN_Init(true);
   setCANFilter(0x123,0x7ff);
   CAN_RegisterRX_ISR(CAN_RX_ISR);
   CAN_RegisterTX_ISR(CAN_TX_ISR);
@@ -592,7 +573,6 @@ void setup() {
   //mutex and semaphores
   keyArrayMutex = xSemaphoreCreateMutex();
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
-  pressedMutex = xSemaphoreCreateMutex();
 
   //Initialise Threads
   TaskHandle_t scanKeysHandle = NULL;
@@ -637,15 +617,13 @@ void setup() {
   setOutMuxBit(HKOW_BIT, HIGH);  //Enable west handshake
   setOutMuxBit(HKOE_BIT, HIGH);  //Enable east handshake
 
-  delayMicroseconds(2000000); //wait 2 sec for other boards to start
+  delayMicroseconds(2000000); //wait 1 sec for other boards to start
 
-  xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-  for(int i = 5; i <= 6; i++) { //read east and west
+  for(int i = 5; i <= 6; i++) {
     setRow(i);
     delayMicroseconds(2);
     keyArray[i] = readCols();
   }
-  xSemaphoreGive(keyArrayMutex);
 
   checkBoards();
   CAN_Start();
