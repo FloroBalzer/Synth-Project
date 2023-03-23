@@ -1,9 +1,9 @@
 # Report
 
 ## Table of Contents <!-- omit from toc -->
-- [Introduction](#Introduction)
+- [Introduction:](#introduction)
 - [Tasks](#tasks)
-- [A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are metunder worst-case conditions](#a-critical-instant-analysis-of-the-rate-monotonic-scheduler-showing-that-all-deadlines-are-metunder-worst-case-conditions)
+- [A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met under worst-case conditions](#a-critical-instant-analysis-of-the-rate-monotonic-scheduler-showing-that-all-deadlines-are-met-under-worst-case-conditions)
 - [A quantification of total CPU utilisation](#a-quantification-of-total-cpu-utilisation)
 - [Shared Data Structures](#shared-data-structures)
 - [An analysis of inter-task blocking dependencies that shows any possibility of deadlock](#an-analysis-of-inter-task-blocking-dependencies-that-shows-any-possibility-of-deadlock)
@@ -41,15 +41,15 @@ By connecting multiple keyboards together, the modules will autmatically detect 
 ## Tasks
 ___
 
-| Name              | Type of Task | Rate of execution                             | Minimum Initiation Interval  | Maximum Execution Time ($\mu$s) |
-|-------------------|--------------|-----------------------------------------------|------------------------------|-----------------------------|
-| SampleISR         | Interrupt    | 22 KHz                                        |                              |                             |
-| CAN_RX_ISR        | Interrupt    | After a message is received on the CAN bus    |                              |                             |
-| CAN_TX_ISR        | Interrupt    | After a message is transmitted on the CAN bus |                              |                             |
-| CAN_TX_Task       | Thread       | When a message is added to the outgoing queue |                              |                             |
-| scanKeysTask      | Thread       | 20ms                                          |                              | 398                         |
-| displayUpdateTask | Thread       | 100ms                                         |                              | 16743                       |
-| decodeTask        | Thread       | When a message is added to the incoming queue |                              | 16                          |
+| Name              | Type of Task | Rate of execution                             | Minimum Initiation Interval (ms) | Maximum Execution Time (ms) | CPU Utilisation (%) |
+|-------------------|--------------|-----------------------------------------------|----------------------------------|-----------------------------|---------------------|
+| SampleISR         | Interrupt    | 22 KHz                                        | 0.045                            | 0.021                       | 46.67               |
+| CAN_RX_ISR        | Interrupt    | After a message is received on the can bus    | 0.512                            | 0.010                       | 1.95                |
+| CAN_TX_ISR        | Interrupt    | After a message is transmitted on the CAN bus | 0.512                            | 0.005                       | 0.98                |
+| CAN_TX_Task       | Thread       | When a message is added to the outgoing queue | 54ms for 36 executions           | 0.012                       | 0.80                |
+| scanKeysTask      | Thread       | 20ms                                          | 20                               | 0.398                       | 1.99                |
+| displayUpdateTask | Thread       | 100ms                                         | 100                              | 16.743                      | 16.74               |
+| decodeTask        | Thread       | When a message is added to the incoming queue | 25.2 for 36 executions           | 0.016                       | 2.28                |
 
 
 ## A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met under worst-case conditions
