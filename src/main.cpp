@@ -8,6 +8,22 @@
 
 #include "knobs.h"
 
+////////control disabling threads == comment out the thread you want to test ==> normal mode == all the thread definitions commented out
+
+// #define DISABLE_THREADS_Scankeys
+#define DISABLE_THREADS_decodeTask
+#define DISABLE_THREADS_displayUpdateHandle
+#define DISABLE_THREADS_CAN_TX_Task
+
+///////// directives to deactivate the statements that attach ISRs.
+
+#define Disable_CAN_RegisterRX_TX_ISR
+#define Disable_attachInterrupt_sampleISR
+#define Disable_msgque
+
+//////////////////////// if test define it will work
+#define TEST_SCANKEYS
+
 //Constants
 
 //Pin definitions
@@ -228,7 +244,9 @@ void scanKeysTask(void * pvParameters) {
   uint8_t TX_Message[8] = {0};
 
   while(1) {
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    #ifndef TEST_SCANKEYS
+      vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    #endif
 
     relative_octive = Octave.value - 4;
 
@@ -333,6 +351,10 @@ void scanKeysTask(void * pvParameters) {
         wavetype = Waveform.value;
       }
     }
+
+    #ifdef TEST_SCANKEYS
+      break;
+    #endif
   }
 }
 
@@ -572,60 +594,76 @@ void setup() {
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
   sampleTimer->setOverflow(22000, HERTZ_FORMAT);
-  sampleTimer->attachInterrupt(sampleISR);
+  #ifndef Disable_attachInterrupt_sampleISR
+    sampleTimer->attachInterrupt(sampleISR);
+  #endif
   sampleTimer->resume();
 
   //Initialise CAN
   CAN_Init(false);
   setCANFilter(0x123,0x7ff);
-  CAN_RegisterRX_ISR(CAN_RX_ISR);
-  CAN_RegisterTX_ISR(CAN_TX_ISR);
+  #ifndef Disable_CAN_RegisterRX_TX_ISR
+    CAN_RegisterRX_ISR(CAN_RX_ISR);
+    CAN_RegisterTX_ISR(CAN_TX_ISR);
+  #endif
 
-  //Initialise Queues
-  msgInQ = xQueueCreate(36,8);
-  msgOutQ = xQueueCreate(36,8);
+// Initialise Queues
+  #ifndef Disable_msgque
+    msgInQ = xQueueCreate(36, 8);
+    msgOutQ = xQueueCreate(36, 8);
+  #else
+    msgInQ = xQueueCreate(384, 8);
+    msgOutQ = xQueueCreate(384, 8);
+  #endif
 
   //mutex and semaphores
   keyArrayMutex = xSemaphoreCreateMutex();
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
   pressedMutex = xSemaphoreCreateMutex();
 
-  //Initialise Threads
-  TaskHandle_t scanKeysHandle = NULL;
-  xTaskCreate(
-  scanKeysTask,		/* Function that implements the task */
-  "scanKeys",		/* Text name for the task */
-  256,      		/* Stack size in words, not bytes */
-  NULL,			/* Parameter passed into the task */
-  2,			/* Task priority */
-  &scanKeysHandle );	/* Pointer to store the task handle */
+  // Initialise Threads
+    TaskHandle_t scanKeysHandle = NULL;
+  #ifndef DISABLE_THREADS_Scankeys
+    xTaskCreate(
+        scanKeysTask,     /* Function that implements the task */
+        "scanKeys",       /* Text name for the task */
+        256,              /* Stack size in words, not bytes */
+        NULL,             /* Parameter passed into the task */
+        2,                /* Task priority */
+        &scanKeysHandle); /* Pointer to store the task handle */
+  #endif
 
-  TaskHandle_t displayUpdateHandle = NULL;
-  xTaskCreate(
-  displayUpdateTask,		/* Function that implements the task */
-  "displayUpdate",		/* Text name for the task */
-  256,      		/* Stack size in words, not bytes */
-  NULL,			/* Parameter passed into the task */
-  1,			/* Task priority */
-  &displayUpdateHandle );	/* Pointer to store the task handle */
+    TaskHandle_t displayUpdateHandle = NULL;
+  #ifndef DISABLE_THREADS_displayUpdateHandle
+    xTaskCreate(
+        displayUpdateTask,     /* Function that implements the task */
+        "displayUpdate",       /* Text name for the task */
+        256,                   /* Stack size in words, not bytes */
+        NULL,                  /* Parameter passed into the task */
+        1,                     /* Task priority */
+        &displayUpdateHandle); /* Pointer to store the task handle */
+  #endif
 
-  TaskHandle_t decodeHandle = NULL;
-  xTaskCreate(
-  decodeTask,		/* Function that implements the task */
-  "decode",		/* Text name for the task */
-  256,      		/* Stack size in words, not bytes */
-  NULL,			/* Parameter passed into the task */
-  1,			/* Task priority */
-  &decodeHandle );
-
-  TaskHandle_t txHandle = NULL;
-  xTaskCreate(
-  CAN_TX_Task,		/* Function that implements the task */
-  "tx",		/* Text name for the task */
-  256,      		/* Stack size in words, not bytes */
-  NULL,			/* Parameter passed into the task */
-  1,			/* Task priority */
-  &txHandle );
+    TaskHandle_t decodeHandle = NULL;
+  #ifndef DISABLE_THREADS_decodeTask
+    xTaskCreate(
+        decodeTask, /* Function that implements the task */
+        "decode",   /* Text name for the task */
+        256,        /* Stack size in words, not bytes */
+        NULL,       /* Parameter passed into the task */
+        1,          /* Task priority */
+        &decodeHandle);
+  #endif
+    TaskHandle_t txHandle = NULL;
+  #ifndef DISABLE_THREADS_CAN_TX_Task
+    xTaskCreate(
+        CAN_TX_Task, /* Function that implements the task */
+        "tx",        /* Text name for the task */
+        256,         /* Stack size in words, not bytes */
+        NULL,        /* Parameter passed into the task */
+        1,           /* Task priority */
+        &txHandle);
+  #endif
 
   //Init Joystick Bias
   __atomic_store_n(&joyXbias, analogRead(A1), __ATOMIC_RELAXED);
@@ -644,6 +682,18 @@ void setup() {
     keyArray[i] = readCols();
   }
   xSemaphoreGive(keyArrayMutex);
+
+  /// Testing each thread ///////////////
+  #ifdef TEST_SCANKEYS
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++)
+    {
+      scanKeysTask(nullptr);
+    }
+    Serial.println(micros() - startTime);
+    while (1)
+      ;
+  #endif
 
   checkBoards();
   CAN_Start();
