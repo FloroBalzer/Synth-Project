@@ -51,7 +51,7 @@ ___
 | displayUpdateTask | Thread       | 100ms                                         | 100                              | 16.743                      | 16.74               |
 | decodeTask        | Thread       | When a message is added to the incoming queue | 25.2 for 36 executions           | 0.016                       | 2.28                |
 
-
+This table outlines the thread initation and execution times and uses these values to calculate the CPU Utilisation. As seen from the table the most demanding task is SampleISR as it has to operate at a much higher frequency. DisplayUpdateTask also has a conisderable contribution to the demand of the CPU as it has to generate every pixel. All the other tasks have a negligible demand on the CPU. 
 
 ## Shared Data Structures
 ___
