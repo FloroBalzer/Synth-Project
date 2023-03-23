@@ -23,6 +23,7 @@
 
 //////////////////////// if test define it will work
 #define TEST_SCANKEYS
+#define 
 // Constants
 
 // Pin definitions
