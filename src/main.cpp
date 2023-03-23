@@ -5,10 +5,9 @@
 #include <STM32FreeRTOS.h>
 #include <ES_CAN.h>
 
-#include <knobs.h>
+#include "knobs.h"
 
 // Constants
-const uint32_t interval = 100; // Display update interval
 
 // Pin definitions
 // Row select and enable
@@ -39,52 +38,21 @@ const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 
 // other
-volatile uint32_t currentStepSize[12] = {0};
+volatile uint32_t currentStepSize;
 volatile int step;
-volatile bool keypressed;
 
 // Step Size Array
-float frequencies[] = {261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392, 415.3, 440, 466.16, 493.88};
-const uint32_t stepSizes[] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0};
-const std::string notes[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Key"};
+const uint32_t stepSizes[13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0};
+const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No key pressed"};
 
-// receiver stuff from zack
-bool receiver = true;
-uint8_t position;
-bool position_set;
-
-bool east;
-bool west;
-
-// CAN Bus
-uint8_t RX_Message[8] = {0};
-
-// Queues
-QueueHandle_t msgInQ;
-QueueHandle_t msgOutQ;
-
-// mutex and semaphores
-SemaphoreHandle_t keyArrayMutex;
-SemaphoreHandle_t CAN_TX_Semaphore;
-
-// key Array
+// Key Array
 SemaphoreHandle_t keyArrayMutex;
 volatile uint8_t keyArray[7];
-volatile uint8_t key_size = 12;
-volatile uint8_t numKeyPress = 0;
 
 // Knobs
 Knob Volume(8, 8, 0, 3);
 Knob Octave(0, 3, 0, 2);
 Knob Waveform(0, 3, 0, 1);
-
-// joystick
-volatile int32_t vstep = 0;
-volatile int32_t bstep = 0;
-volatile int joyY = 490;
-volatile int joyX = 563;
-volatile int joyXbias;
-volatile int joyYbias;
 
 // waveforms
 //  This is the only wave we set up "by hand"
@@ -237,149 +205,92 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value)
   digitalWrite(REN_PIN, LOW);
 }
 
-void CAN_RX_ISR(void)
+void sampleISR()
 {
-  uint8_t RX_Message_ISR[8];
-  uint32_t ID;
-  CAN_RX(ID, RX_Message_ISR);
-  xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
-}
-void CAN_TX_ISR(void)
-{
-  xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
+  static uint32_t phaseAcc = 0;
+
+  phaseAcc += currentStepSize << Octave.value;
+
+  int wavetype = Waveform.value;
+  int32_t Vout;
+
+  if (wavetype == 0)
+  {
+    // Sawtooth
+    Vout = (phaseAcc >> 24) - 128;
+  }
+  else if (wavetype == 1)
+  {
+    // Square
+    Vout = (phaseAcc >> 24) > 128 ? -128 : 127;
+  }
+  else if (wavetype == 2)
+  {
+    // Triangle
+    if ((phaseAcc >> 24) >= 128)
+    {
+      Vout = ((255 - (phaseAcc >> 24)) * 2) - 128;
+    }
+    else
+    {
+      // equivalent to phaseAcc >> 24 * 2
+      Vout = (phaseAcc >> 23) - 128;
+    }
+  }
+
+  else if (wavetype == 3)
+  {
+    // sinusoid
+    int idx;
+
+    if ((phaseAcc >> 24) >= 128)
+    {
+      idx = 255 - (phaseAcc >> 24);
+    }
+    else
+    {
+      idx = phaseAcc >> 24;
+    }
+
+    Vout = sinetable[idx] - 128;
+  }
+
+  Vout = Vout >> (8 - Volume.value);
+
+  analogWrite(OUTR_PIN, Vout + 128);
 }
 
 void setRow(uint8_t rowIdx)
 {
   digitalWrite(REN_PIN, LOW);
-  digitalWrite(RA0_PIN, rowIdx & 0x01);
-  digitalWrite(RA1_PIN, rowIdx & 0x02);
-  digitalWrite(RA2_PIN, rowIdx & 0x04);
+  unsigned char RA2 = rowIdx & 0b00000100; // RA2
+  unsigned char RA1 = rowIdx & 0b00000010; // RA1
+  unsigned char RA0 = rowIdx & 0b00000001; // RA2
+  digitalWrite(RA2_PIN, RA2);
+  digitalWrite(RA1_PIN, RA1);
+  digitalWrite(RA0_PIN, RA0);
   digitalWrite(REN_PIN, HIGH);
 }
 
 uint8_t readCols()
 {
-  int C0 = digitalRead(C0_PIN);
-  int C1 = digitalRead(C1_PIN);
-  int C2 = digitalRead(C2_PIN);
-  int C3 = digitalRead(C3_PIN);
-  uint8_t col_input = (C0 << 3) | (C1 << 2) | (C2 << 1) | (C3);
-
-  return col_input;
+  int a = digitalRead(C0_PIN);
+  int b = digitalRead(C1_PIN);
+  int c = digitalRead(C2_PIN);
+  int d = digitalRead(C3_PIN);
+  uint8_t colout = (a << 3) | (b << 2) | (c << 1) | (d);
+  return colout;
 }
 
-void sampleISR()
-{
-
-  static uint32_t phaseAcc[12] = {0};
-
-  // start bend
-  // end bend
-  // int wavetype = Waveform.value;
-  int32_t Vout = 0;
-  if (receiver)
-  {
-    for (int i = 0; i < key_size; i++)
-    {
-      if (currentStepSize[i] != 0)
-      {
-
-        //     int bend = abs(joyX - joyXbias);
-        //     if (bend < 28)
-        //     {
-        //       bend = 28;
-        //     }
-        //     if (joyX > joyXbias)
-        //     {
-        //       bstep = bend * 17961;
-        //     }
-        //     if (joyX <= joyXbias)
-        //     {
-        //       bstep = bend * -17961;
-        //     }
-        //     if (bend < 50)
-        //     {
-        //       bstep = 0;
-        //     }
-        //   }
-        //   else
-        //   {
-        //     bstep = 0;
-        //   }
-        // if (wavetype == 0)
-        // {
-        // Sawtooth
-        phaseAcc[i] += (int)(currentStepSize[i]);
-        Vout += (int)(phaseAcc[i] >> 24) - 128;
-      }
-    }
-  }
-
-  // }
-  // else if (wavetype == 1)
-  // {
-  //   // Square
-  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-  //   Vout += (phaseAcc[i] >> 24) > 128 ? -128 : 127;
-  // }
-  // else if (wavetype == 2)
-  // {
-  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-  //   // Triangle
-  //   if ((phaseAcc[i] >> 24) >= 128)
-  //   {
-
-  //     Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 128;
-  //   }
-  //   else
-  //   {
-  //     // equivalent to phaseAcc[i] >> 24 * 2
-  //     Vout += (phaseAcc[i] >> 23) - 128;
-  //   }
-  // }
-  // else if (wavetype == 3)
-  // {
-  //   // sinusoid
-  //   int idx;
-  //   phaseAcc[i] += (currentStepSize[i]) << Octave.value;
-
-  //   if ((phaseAcc[i] >> 24) >= 128)
-  //   {
-  //     idx = 255 - (phaseAcc[i] >> 24);
-  //   }
-  //   else
-  //   {
-  //     idx = phaseAcc[i] >> 24;
-  //   }
-
-  //   Vout += sinetable[idx] + 128;
-  // }
-  // }
-
-  Vout = (int)Vout >> (8 - Volume.value);
-  if (Vout > 127)
-  {
-    Vout = 127;
-  }
-  else if (Vout < -128)
-  {
-    Vout = 128;
-  }
-
-  analogWrite(OUTR_PIN, Vout + 128);
-}
 void scanKeysTask(void *pvParameters)
 {
 
-  const TickType_t xFrequency = 200 / portTICK_PERIOD_MS;
+  const TickType_t xFrequency = 20 / portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   uint8_t keys;
   int wavetype;
 
-  int local_key;
-  int local_stepsize;
   // CAN BUS
   uint8_t TX_Message[8] = {0};
 
@@ -389,7 +300,7 @@ void scanKeysTask(void *pvParameters)
 
     __atomic_store_n(&step, 12, __ATOMIC_RELAXED);
 
-    for (uint8_t i = 0; i < 7; i++)
+    for (uint8_t i = 0; i < 5; i++)
     {
       setRow(i);
       delayMicroseconds(3);
@@ -405,69 +316,23 @@ void scanKeysTask(void *pvParameters)
         {
           if (~keys & (1 << j))
           {
-            __atomic_store_n(&currentStepSize[3 - j + (i * 4)], stepSizes[3 - j + (i * 4)], __ATOMIC_RELAXED);
-          }
-          else
-          {
-            __atomic_store_n(&currentStepSize[3 - j + (i * 4)], 0, __ATOMIC_RELAXED);
+            __atomic_store_n(&step, 3 - j + (i * 4), __ATOMIC_RELAXED);
           }
         }
-        int key_loop = 0xf;
-        for (int i = 0; i < 8; i++)
-        {
-          key_loop = keyArray[i] & key_loop;
-        }
-        if (key_loop == 0xf)
-          keypressed = false;
-        else
-          keypressed = true;
       }
-      else if (i == 5)
-      {
-        if (~keys & 1)
-        {
-          west = true;
-        }
-        else
-        {
-          west = false;
-        }
-      }
-      else if (i == 6)
-      {
-        if (~keys & 1)
-        {
-          east = true;
-        }
-        else
-        {
-          east = false;
-        }
-      }
+
+      __atomic_store_n(&currentStepSize, stepSizes[step], __ATOMIC_RELAXED);
     }
-    // Serial.println(keyArray[0] & keyArray[1] & keyArray[2]);
-    //   Serial.println(keyArray[i], BIN);
-    // Serial.println(numKeyPress);
-    // Serial.println("br");
 
     Volume.read_knob();
     Octave.read_knob();
     Waveform.read_knob();
 
-    if (step == 12)
-    {
-      TX_Message[0] = 'R';
-      TX_Message[1] = Octave.value;
-    }
-    else
-    {
-      TX_Message[0] = 'P';
-      TX_Message[1] = Octave.value;
-      TX_Message[2] = step;
-    }
+    TX_Message[0] = 'p';
+    TX_Message[1] = Octave.value;
+    TX_Message[2] = step;
 
-    // CAN_TX(0x123, TX_Message);
-    xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+    CAN_TX(0x123, TX_Message);
   }
 }
 
@@ -478,10 +343,16 @@ void displayUpdateTask(void *pvParameters)
 
   // CAN Bus
   uint32_t ID;
+  uint8_t RX_Message[8] = {0};
 
   while (1)
   {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+    while (CAN_CheckRXLevel())
+    {
+      CAN_RX(ID, RX_Message);
+    }
 
     // Update display
     u8g2.clearBuffer();                 // clear the internal memory
@@ -496,10 +367,6 @@ void displayUpdateTask(void *pvParameters)
     u8g2.print(keyArray[1], HEX);
     u8g2.print(" ");
     u8g2.print(keyArray[0], HEX);
-
-    receiver ? u8g2.drawStr(66, 20, "Receiver") : u8g2.drawStr(66, 20, "Sender");
-    u8g2.setCursor(120, 20);
-    u8g2.print(position, HEX);
 
     u8g2.drawStr(2, 30, "V: ");
     u8g2.setCursor(15, 30);
@@ -523,187 +390,9 @@ void displayUpdateTask(void *pvParameters)
     digitalToggle(LED_BUILTIN);
   }
 }
-// void vibratoTask(void *pvParameters)
-// {
-//   const TickType_t xFrequency = 10 / portTICK_PERIOD_MS;
-//   TickType_t xLastWakeTime = xTaskGetTickCount();
-//   int v_count = 0;
-//   bool hit_peak = false;
-//   while (1)
-//   {
-
-//     vTaskDelayUntil(&xLastWakeTime, xFrequency);
-//     int t = 1;
-//     {
-//       for (int j; j < key_size; j++)
-//       {
-//         if (currentStepSize[j] != 0)
-//         {
-//           int center = abs(joyY - joyYbias);
-//           // y of joystick min 900 max 138 mid 490
-//           if (!hit_peak)
-//             v_count++;
-//           else
-//             v_count--;
-//           if (v_count == 128)
-//             hit_peak = true;
-//           if (v_count == 0)
-//             hit_peak = false;
-//           vstep = (sinetable[v_count] - 128) * 10e4;
-//           delay()
-//         }
-//       }
-//     }
-//   }
-// }
-void broadcastPosition()
-{
-  uint8_t TX_Message[8] = {0};
-
-  TX_Message[0] = 'H';
-  TX_Message[1] = 0;
-  TX_Message[2] = position;
-
-  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-}
-void broadcastEndHandshake()
-{
-  uint8_t TX_Message[8] = {0};
-
-  if (position != 0)
-  {
-    receiver = false;
-  }
-  Octave.set_value(position + 4);
-  TX_Message[0] = 'E';
-  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-}
-void decodeTask(void *pvParameters)
-{
-  bool external_pressed;
-
-  int local_stepsize;
-  int relative_octive;
-
-  while (1)
-  {
-    xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
-
-    switch (RX_Message[0])
-    {
-    case 'R':
-      external_pressed = false;
-      Octave.set_value(RX_Message[1] + position);
-      local_stepsize = stepSizes[12];
-      __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
-      Octave.set_value(RX_Message[1] + position);
-      break;
-
-    case 'P':
-      external_pressed = true;
-      Octave.set_value(RX_Message[1] + position);
-      relative_octive = Octave.value - 4;
-      if (relative_octive > 0)
-      {
-        local_stepsize = stepSizes[RX_Message[2]] << relative_octive;
-      }
-      else
-      {
-        local_stepsize = stepSizes[RX_Message[2]] >> abs(relative_octive);
-      }
-      __atomic_store_n(&currentStepSize, local_stepsize, __ATOMIC_RELAXED);
-      break;
-
-    case 'H':
-      Serial.println(RX_Message[0]);
-      if (!west)
-      {
-        if (!position_set)
-        {
-          position = RX_Message[2] + 1;
-          position_set = true;
-        }
-        if (!east)
-        {
-          broadcastEndHandshake();
-        }
-        else
-        {
-          setOutMuxBit(HKOW_BIT, LOW);
-          broadcastPosition();
-        }
-      }
-      break;
-    case 'E':
-      if (position == 0)
-      {
-        receiver = true;
-      }
-      else
-      {
-        position = false;
-      }
-      Octave.set_value(position + 4);
-    }
-  }
-}
-void CAN_TX_Task(void *pvParameters)
-{
-  uint8_t msgOut[8];
-  while (1)
-  {
-    xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
-    xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
-    CAN_TX(0x123, msgOut);
-  }
-}
-void checkBoards()
-{
-  if (~keyArray[5] & 1)
-  {
-    west = true;
-    Serial.println("Connected West");
-  }
-  else if (~keyArray[6] & 1)
-  {
-    east = true;
-    Serial.println("Connected East");
-  }
-
-  if (!west)
-  {
-    // leftmost board
-    position = 0;
-    position_set = true;
-    Serial.println("Leftmost board");
-
-    if (!east)
-    {
-      // Only one module - end handshake
-      Serial.println("Only One Module");
-      CAN_Init(true);
-    }
-  }
-}
-void initialHandshake()
-{
-  if (position_set)
-  {
-    if (!east)
-    {
-      Octave.set_value(position + 4);
-    }
-    else
-    {
-      setOutMuxBit(HKOW_BIT, LOW);
-      broadcastPosition();
-    }
-  }
-}
 
 void setup()
 {
-  // put your setup code here, to run once:
 
   // Set pin directions
   pinMode(RA0_PIN, OUTPUT);
@@ -731,9 +420,8 @@ void setup()
 
   // Initialise UART
   Serial.begin(9600);
-  Serial.println("Hello World");
 
-  // Timer
+  // settimer
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
   sampleTimer->setOverflow(22000, HERTZ_FORMAT);
@@ -741,19 +429,10 @@ void setup()
   sampleTimer->resume();
 
   // Initialise CAN
-  CAN_Init(false);
-  // CAN_Init(true);
+  CAN_Init(true);
   setCANFilter(0x123, 0x7ff);
-  CAN_RegisterRX_ISR(CAN_RX_ISR);
-  CAN_RegisterTX_ISR(CAN_TX_ISR);
-  // Initialise Queues
-  msgInQ = xQueueCreate(36, 8);
-  msgOutQ = xQueueCreate(36, 8);
+  CAN_Start();
 
-  // mutex and semaphores
-  keyArrayMutex = xSemaphoreCreateMutex();
-  CAN_TX_Semaphore = xSemaphoreCreateCounting(3, 3);
-  // Initialise Threads
   TaskHandle_t scanKeysHandle = NULL;
   xTaskCreate(
       scanKeysTask,     /* Function that implements the task */
@@ -771,39 +450,8 @@ void setup()
       NULL,                  /* Parameter passed into the task */
       1,                     /* Task priority */
       &displayUpdateHandle); /* Pointer to store the task handle */
-  TaskHandle_t txHandle = NULL;
-  xTaskCreate(
-      CAN_TX_Task, /* Function that implements the task */
-      "tx",        /* Text name for the task */
-      256,         /* Stack size in words, not bytes */
-      NULL,        /* Parameter passed into the task */
-      1,           /* Task priority */
-      &txHandle);
-  // initialise handshake
-  setOutMuxBit(HKOW_BIT, HIGH); // Enable west handshake
-  setOutMuxBit(HKOE_BIT, HIGH); // Enable east handshake
-  for (int i = 5; i <= 6; i++)
-  {
-    setRow(i);
-    delayMicroseconds(2);
-    keyArray[i] = readCols();
-  }
-  // TaskHandle_t vibratoHandle = NULL;
-  // xTaskCreate(
-  //     vibratoTask,     /* Function that implements the task */
-  //     "vibrato",       /* Text name for the task */
-  //     64,              /* Stack size in words, not bytes */
-  //     NULL,            /* Parameter passed into the task */
-  //     1,               /* Task priority */
-  //     &vibratoHandle); /* Pointer to store the task handle */
 
-  delayMicroseconds(1000000); // wait 1 sec for other boards to start
-  checkBoards();
-  CAN_Start();
-  delayMicroseconds(1000000);
-  initialHandshake();
-  joyXbias = analogRead(A1);
-  joyYbias = analogRead(A0);
+  keyArrayMutex = xSemaphoreCreateMutex();
 
   vTaskStartScheduler();
 }
