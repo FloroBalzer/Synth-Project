@@ -8,24 +8,31 @@
 - [An analysis of inter-task blocking dependencies that shows any possibility of deadlock](#an-analysis-of-inter-task-blocking-dependencies-that-shows-any-possibility-of-deadlock)
 
 ## Introduction:
+
 This implementation of a modular keyboard on the STM32 contains a variety of functions. The use of these functions will be explained in this section.
 
 **Knobs:**
-- Counting from the left, *Knob 1* : Unassigned
-- *Knob 2: Waveform Select*. The design comes with 4 different waveforms with the following indexes: 0: Sawtooth, 1:Square, 2: Triangle, 3: Sine.
-- *Knob 3: Octave Control:* Selects the octave being played, from 1 to 7, with octave 4  having A at 440Hz.
-- *Knob 4 : Volume Control:* Set the output volume of the synth, varies between 0 and 8.
+
+- Counting from the left, *Knob 1* : Volume Control: Set the output volume of the synth, varies between 0 and 8.
+- *Knob 2:* Octave Control:* Selects the octave being played, from 1 to 7, with octave 4  having A at 440Hz.
+- *Knob 3:* Waveform Select*. The design comes with 4 different waveforms with the following indexes: 0: Sawtooth, 1:Square, 2: Triangle, 3: Sine.
+- *Knob 4:* Unassigned
 
 **Joystick**
+
 The input on the x-axis of the joystick gives a variable pitch bend to the tone being played. Pushing the joystick to the right will increase the pitch, while pushing it to the left will decrease it.
 
 **Polyphony**
+
 The synth is able to play multiple keys at once.
 
 **Display**
 
+The display shows the current values set on the knobs as V: Volume, O: Octave, W: Waveform. Additionally, it displays the current keys being played.
+
 **Modular Option**
-By connecting multiple keyboards together, the modules will autmatically detect each other and form a full synthesizer, keeping all the above functions. The leftmost board becomes the master board, allowing its knobs to control every function across the whole range. It is recommended to reset all the boards at the same time once they are connected.
+
+By connecting multiple keyboards together, the modules will autmatically detect each other and combine to give a full keyboard range, keeping all the above functions. The leftmost board becomes the master board, allowing its knobs to control every function across the whole range. The octave values are shifted accordingly to keep the pitches of each board in ascending order. It is recommended to reset all the boards at the same time once they are connected. When the board are used in a modular implementation, only the rightmost board will have an active display, showing the current setting. However, it will only be able to show the keys being played on itself.
 
 
 
