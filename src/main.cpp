@@ -41,7 +41,7 @@ const int HKOE_BIT = 6;
 //Step Size and notes
 const uint32_t stepSizes [13] = {51076057, 54113197, 57330935, 60740010, 64351799, 68178356, 72232452, 76527617, 81078186, 85899346, 91007189, 96418756, 0 };
 const std::string notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B","No key pressed"};
-const uint8_t key_size = 36;
+const uint8_t key_size = 60;
 
 volatile uint8_t keyArray[7];
 volatile uint32_t currentStepSize[key_size] = {0};
@@ -71,14 +71,11 @@ Knob Volume(8, 8, 0, 0);
 Knob Octave(4, 7, 1, 1);
 Knob Waveform(0, 3, 0, 2);
 
-<<<<<<< Updated upstream
-=======
-//joystick
-volatile int32_t bstep = 0;
+//Joystick - bend
+const int bend_modifier = -17961;
+volatile int bend;
 volatile int joyXbias;
-int bend;
 
->>>>>>> Stashed changes
 //waveforms
 const unsigned char sinetable[128] = {
     0,   0,   0,   0,   1,   1,   1,   2,   2,   3,   4,   5,   5,   6,   7,   9,
@@ -109,31 +106,26 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 void sampleISR() {
 
   static uint32_t phaseAcc[key_size] = {0};
-
   int wavetype = Waveform.value;
+  int32_t bstep;
   int32_t Vout = 0;
 
   for (int i = 0; i < key_size; i++) {
     if (currentStepSize[i] != 0) {
-<<<<<<< Updated upstream
-=======
       
-      if(bend > 0 && abs(bend) < 28) {
+       if (abs(bend) < 28)
+      {
         bend = 28;
       }
-      else if(bend <= 0 && abs(bend) < 28) {
-        bend = -28;
-      }
 
-      bstep = bend * -17961;
+      bstep = bend * bend_modifier;
 
       if (abs(bend) < 50)
       {
         bstep = 0;
       }
->>>>>>> Stashed changes
       
-      phaseAcc[i] += (int)(currentStepSize[i]);
+      phaseAcc[i] += (int)(currentStepSize[i]) + bstep;
 
       if (wavetype == 0) {
         // Sawtooth - linear increase
@@ -146,17 +138,10 @@ void sampleISR() {
       else if (wavetype == 2) {
         // Triangle - <128 linear increase, >128 linear decrease
         if ((phaseAcc[i] >> 24) >= 128) {
-<<<<<<< Updated upstream
           Vout += ((255 - (phaseAcc[i] >> 24)) * 2) - 127;
         }
         else {
           Vout += (phaseAcc[i] >> 23) - 128;
-=======
-          Vout += (((255 - (phaseAcc[i] >> 24)) * 2) - 127);
-        }
-        else {
-          Vout += ((phaseAcc[i] >> 23) - 128);
->>>>>>> Stashed changes
         }
       }
       else if (wavetype == 3) {
@@ -170,11 +155,7 @@ void sampleISR() {
           idx = phaseAcc[i] >> 24;
         }
 
-<<<<<<< Updated upstream
         Vout += sinetable[idx] - 128;
-=======
-        Vout += (sinetable[idx] - 128);
->>>>>>> Stashed changes
       }
     }
   }
@@ -334,16 +315,11 @@ void scanKeysTask(void * pvParameters) {
       Volume.read_knob();
       Octave.read_knob();
       Waveform.read_knob();
-<<<<<<< Updated upstream
+      
+      joyX = analogRead(A1);
+      __atomic_store_n(&bend, joyX-joyXbias, __ATOMIC_RELAXED);
 
       if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){ //change to knobs
-=======
-      joyX = analogRead(A1);
-
-      bend = joyX - joyXbias;
-
-      if(vol != Volume.value || oct != Octave.value || wavetype != Waveform.value){
->>>>>>> Stashed changes
 
         TX_Message[0] = 'K';
         TX_Message[1] = Volume.value;
@@ -536,7 +512,7 @@ void checkBoards() {
     __atomic_store_n(&west, true, __ATOMIC_RELAXED);
   }
   else if(~keyArray[6] & 1) { //detect east
-    __atomic_store_n(&east, false, __ATOMIC_RELAXED);
+    __atomic_store_n(&east, true, __ATOMIC_RELAXED);
   }
   xSemaphoreGive(keyArrayMutex);
 
@@ -619,7 +595,7 @@ void setup() {
   xTaskCreate(
   scanKeysTask,		/* Function that implements the task */
   "scanKeys",		/* Text name for the task */
-  64,      		/* Stack size in words, not bytes */
+  256,      		/* Stack size in words, not bytes */
   NULL,			/* Parameter passed into the task */
   2,			/* Task priority */
   &scanKeysHandle );	/* Pointer to store the task handle */
@@ -650,6 +626,10 @@ void setup() {
   NULL,			/* Parameter passed into the task */
   1,			/* Task priority */
   &txHandle );
+
+  //Init Joystick Bias
+  __atomic_store_n(&joyXbias, analogRead(A1), __ATOMIC_RELAXED);
+
 
   //initialise handshake
   setOutMuxBit(HKOW_BIT, HIGH);  //Enable west handshake

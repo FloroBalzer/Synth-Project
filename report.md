@@ -71,6 +71,8 @@ ___
 | bool     | west                      | Atomic stores only |
 | bool     | east                      | Atomic stores only |
 | uint8_t  | RX_Mesage[8]              | keyArrayMutex      |
+| int      | bend                      | Atomic stores only |
+| int      | joyXbias                  | Atomic stores only |
 
 In addition to this each knob defined as type Knob, where the Knob class is made safe by using atomic stores only.
 
