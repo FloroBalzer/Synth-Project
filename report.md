@@ -1,7 +1,7 @@
 # Report
 
 ## Table of Contents <!-- omit from toc -->
-- [Introduction](##Introduction)
+- [Introduction](#Introduction)
 - [Tasks](#tasks)
 - [A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are metunder worst-case conditions](#a-critical-instant-analysis-of-the-rate-monotonic-scheduler-showing-that-all-deadlines-are-metunder-worst-case-conditions)
 - [A quantification of total CPU utilisation](#a-quantification-of-total-cpu-utilisation)
