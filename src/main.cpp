@@ -15,9 +15,10 @@
 // #define DISABLE_THREADS_decodeTask
 // #define DISABLE_THREADS_CAN_TX_Task
 
-///////// directives to deactivate the statements that attach ISRs.
+/////// directives to deactivate the statements that attach ISRs.
 
-// #define Disable_CAN_RegisterRX_TX_ISR
+// #define Disable_CAN_RegisterRX_ISR
+// #define Disable_CAN_RegisterTX_ISR
 // #define Disable_attachInterrupt_sampleISR
 // #define Disable_msgque
 
@@ -26,6 +27,11 @@
 // #define TEST_DISPLAY
 // #define TEST_DECODE
 // #define TEST_CAN
+// #define TEST_sampleISR
+// #define TEST_RX_ISR
+//  #define TEST_TX_ISR
+
+//initation Interval
 
 //Constants
 
@@ -187,10 +193,13 @@ void sampleISR() {
 }
 
 void CAN_RX_ISR (void) {
+  
 	uint8_t RX_Message_ISR[8];
 	uint32_t ID;
 	CAN_RX(ID, RX_Message_ISR);
-	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+  #ifndef Disable_CAN_RegisterRX_ISR
+	  xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+  #endif
 }
 
 void CAN_TX_ISR (void) {
@@ -637,8 +646,10 @@ void setup() {
   //Initialise CAN
   CAN_Init(false);
   setCANFilter(0x123,0x7ff);
-  #ifndef Disable_CAN_RegisterRX_TX_ISR
+  #ifndef Disable_CAN_RegisterRX_ISR
     CAN_RegisterRX_ISR(CAN_RX_ISR);
+  #endif
+  #ifndef Disable_CAN_RegisterTX_ISR
     CAN_RegisterTX_ISR(CAN_TX_ISR);
   #endif
 
@@ -717,6 +728,8 @@ void setup() {
   }
   xSemaphoreGive(keyArrayMutex);
 
+ 
+
   /// Testing each thread ///////////////
   #ifdef TEST_SCANKEYS
     uint32_t startTime = micros();
@@ -725,8 +738,7 @@ void setup() {
       scanKeysTask(nullptr);
     }
     Serial.println(micros() - startTime);
-    while (1)
-      ;
+    while (1);
   #endif
 
   #ifdef TEST_DISPLAY
@@ -736,8 +748,7 @@ void setup() {
       displayUpdateTask(nullptr);
     }
     Serial.println(micros() - startTime);
-    while (1)
-      ;
+    while (1);
   #endif
 
   #ifdef TEST_DECODE
@@ -747,10 +758,26 @@ void setup() {
       decodeTask(nullptr);
     }
     Serial.println(micros() - startTime);
-    while (1)
-      ;
+    while (1);
   #endif
 
+    #ifdef TEST_sampleISR
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++)
+    {
+      sampleISR();
+    }
+    Serial.println(micros() - startTime);
+    while (1);
+  #endif
+
+
+
+  //CAN Tests
+  checkBoards();
+  CAN_Start();
+  delayMicroseconds(1000000);
+  initialHandshake();
 
   #ifdef TEST_CAN
     uint32_t startTime = micros();
@@ -759,17 +786,28 @@ void setup() {
       CAN_TX_Task(nullptr);
     }
     Serial.println(micros() - startTime);
-    while (1)
-      ;
+    while (1);
   #endif
 
+  #ifdef TEST_TX_ISR
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++)
+    {
+      CAN_TX_ISR();
+    }
+    Serial.println(micros() - startTime);
+    while (1);
+  #endif
 
-
-
-  checkBoards();
-  CAN_Start();
-  delayMicroseconds(1000000);
-  initialHandshake();
+  #ifdef TEST_RX_ISR
+    uint32_t startTime = micros();
+    for (int iter = 0; iter < 32; iter++)
+    {
+      CAN_RX_ISR();
+    }
+    Serial.println(micros() - startTime);
+    while (1);
+  #endif  
 
   vTaskStartScheduler();
 }
