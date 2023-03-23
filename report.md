@@ -38,7 +38,7 @@ By connecting multiple keyboards together, the modules will autmatically detect 
 
 
 
-## Tasks
+## Timing and CPU Analysis
 ___
 
 | Name              | Type of Task | Rate of execution                             | Minimum Initiation Interval (ms) | Maximum Execution Time (ms) | CPU Utilisation (%) |
