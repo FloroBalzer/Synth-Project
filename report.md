@@ -13,6 +13,7 @@
 This implementation of a modular keyboard on the STM32 contains a variety of functions. The use of these functions will be explained in this section.
 
 **Knobs:**
+
 Counting from the left, 
 - *Knob 1* : Volume Control: Set the output volume of the synth, varies between 0 and 8.
 - *Knob 2:* Octave Control:* Selects the octave being played, from 1 to 7, with octave 4  having A at 440Hz.
