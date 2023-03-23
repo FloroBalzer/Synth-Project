@@ -1,6 +1,7 @@
 # Report
 
 ## Table of Contents <!-- omit from toc -->
+- [Introduction](##Introduction)
 - [Tasks](#tasks)
 - [A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are metunder worst-case conditions](#a-critical-instant-analysis-of-the-rate-monotonic-scheduler-showing-that-all-deadlines-are-metunder-worst-case-conditions)
 - [A quantification of total CPU utilisation](#a-quantification-of-total-cpu-utilisation)
@@ -32,7 +33,7 @@ The display shows the current values set on the knobs as V: Volume, O: Octave, W
 
 **Modular Option**
 
-By connecting multiple keyboards together, the modules will autmatically detect each other and combine to give a full keyboard range, keeping all the above functions. The leftmost board becomes the master board, allowing its knobs to control every function across the whole range. The octave values are shifted accordingly to keep the pitches of each board in ascending order. It is recommended to reset all the boards at the same time once they are connected. When the board are used in a modular implementation, only the rightmost board will have an active display, showing the current setting. However, it will only be able to show the keys being played on itself.
+By connecting multiple keyboards together, the modules will autmatically detect each other and combine to give a full keyboard range, keeping all the above functions. The leftmost board becomes the master board, allowing its knobs to control every function across the whole range. The octave values are shifted accordingly to keep the pitches of each board in ascending order. It is recommended to reset all the boards at the same time once they are connected. When the board are used in a modular implementation, only the rightmost board will have an active display, showing the current setting and whether it is acting as a receiver or a sender. However, it will only be able to show the keys being played on itself.
 
 
 
